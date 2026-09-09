@@ -88,7 +88,8 @@
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>Agency</th><th>Visit type</th><th>Expected pay</th>
+              <th>Date</th><th>Agency</th><th>Visit type</th><th>Visit pay</th>
+              <th>Travel</th><th>Extra</th><th>Total</th>
               <th>Pay date</th><th>Status</th><th>Notes</th><th></th>
             </tr>
           </thead>
@@ -135,6 +136,14 @@
 
         <label>Expected pay per visit <span class="optional">(auto-fills from the agency's rate)</span>
           <input type="number" id="m-visit-amount" step="0.01" min="0" placeholder="0.00" required />
+        </label>
+
+        <label>Travel pay <span class="optional">(mileage / travel time, optional)</span>
+          <input type="number" id="m-visit-travel" step="0.01" min="0" placeholder="0.00" />
+        </label>
+
+        <label>Extra pay <span class="optional">(bonus, covering a shift, etc. — optional)</span>
+          <input type="number" id="m-visit-extra" step="0.01" min="0" placeholder="0.00" />
         </label>
 
         <label>Expected pay date <span class="optional">(if known)</span>

@@ -23,6 +23,12 @@ type, expected pay, and pay status.
   Recertification, or OASIS), expected pay, expected pay date, and status
   (pending / paid / disputed). If the agency has a standard rate set for that
   visit type, the amount auto-fills — still editable per visit.
+- **Travel pay & extra pay** — each visit also has two optional add-on
+  amounts: travel pay (mileage/travel time) and extra pay (a bonus, covering
+  a shift, or other one-off compensation). Both are added to the visit's
+  base pay everywhere totals show up — the calendar, the visits table, pay
+  periods, and reconciliation — while staying broken out separately in the
+  visits table and CSV export so you can see exactly what each dollar was for.
 - **Expected pay by period** — every visit is automatically grouped into its
   agency's pay period, so you can see what you're owed — per agency, per
   period — before a check even arrives.

@@ -31,6 +31,10 @@
     return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
   }
 
+  function visitTotal(v) {
+    return (Number(v.amount) || 0) + (Number(v.travelPay) || 0) + (Number(v.extraPay) || 0);
+  }
+
   function formatDate(iso) {
     if (!iso) return "—";
     var parts = iso.split("-");
@@ -348,7 +352,9 @@
       row.className = "day-visit-row";
       row.innerHTML =
         '<div class="dv-main"><div class="dv-company">' + escapeHtml(agencyName(v.agencyId)) + "</div>" +
-        '<div class="dv-meta">' + escapeHtml(v.visitType || "—") + " · " + escapeHtml(formatMoney(v.amount)) + "</div></div>" +
+        '<div class="dv-meta">' + escapeHtml(v.visitType || "—") + " · " + escapeHtml(formatMoney(visitTotal(v))) +
+        (v.travelPay || v.extraPay ? " <span class=\"optional\">(incl. " + [v.travelPay ? "travel " + escapeHtml(formatMoney(v.travelPay)) : null, v.extraPay ? "extra " + escapeHtml(formatMoney(v.extraPay)) : null].filter(Boolean).join(", ") + ")</span>" : "") +
+        "</div></div>" +
         statusBadge(v.status) +
         '<div class="row-actions"><button type="button" class="icon-btn" data-m-edit="' + v.id + '">Edit</button>' +
         '<button type="button" class="icon-btn danger" data-m-delete="' + v.id + '">Delete</button></div>';
@@ -395,6 +401,8 @@
     mVisitType.value = v.visitType || "";
     amountManuallyEdited = false;
     mVisitAmount.value = v.amount || "";
+    document.getElementById("m-visit-travel").value = v.travelPay || "";
+    document.getElementById("m-visit-extra").value = v.extraPay || "";
     document.getElementById("m-visit-pay-date").value = v.payDate || "";
     document.getElementById("m-visit-status").value = v.status || "pending";
     document.getElementById("m-visit-notes").value = v.notes || "";
@@ -421,6 +429,8 @@
       agencyId: mVisitAgency.value,
       visitType: mVisitType.value,
       amount: parseFloat(mVisitAmount.value) || 0,
+      travelPay: parseFloat(document.getElementById("m-visit-travel").value) || 0,
+      extraPay: parseFloat(document.getElementById("m-visit-extra").value) || 0,
       payDate: document.getElementById("m-visit-pay-date").value,
       status: document.getElementById("m-visit-status").value,
       notes: document.getElementById("m-visit-notes").value.trim()
@@ -503,7 +513,7 @@
       if (dayVisits.length) {
         var total = document.createElement("span");
         total.className = "cal-day-total";
-        total.textContent = formatMoney(dayVisits.reduce(function (s, v) { return s + (Number(v.amount) || 0); }, 0));
+        total.textContent = formatMoney(dayVisits.reduce(function (s, v) { return s + visitTotal(v); }, 0));
         head.appendChild(total);
       }
       cell.appendChild(head);
@@ -513,8 +523,9 @@
         var chip = document.createElement("button");
         chip.type = "button";
         chip.className = "cal-chip chip-" + v.status;
-        chip.textContent = agencyName(v.agencyId) + " · " + formatMoney(v.amount);
-        chip.title = agencyName(v.agencyId) + " — " + (v.visitType || "Unspecified visit type") + " — " + formatMoney(v.amount);
+        chip.textContent = agencyName(v.agencyId) + " · " + formatMoney(visitTotal(v));
+        chip.title = agencyName(v.agencyId) + " — " + (v.visitType || "Unspecified visit type") + " — " + formatMoney(visitTotal(v)) +
+          (v.travelPay || v.extraPay ? " (visit " + formatMoney(v.amount) + (v.travelPay ? ", travel " + formatMoney(v.travelPay) : "") + (v.extraPay ? ", extra " + formatMoney(v.extraPay) : "") + ")" : "");
         chip.addEventListener("click", function (e) {
           e.stopPropagation();
           openDayModal(cellIso, v.id);
@@ -588,6 +599,9 @@
         "<td>" + escapeHtml(agencyName(v.agencyId)) + "</td>" +
         "<td>" + escapeHtml(v.visitType || "—") + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatMoney(v.amount)) + "</td>" +
+        "<td class=\"num\">" + escapeHtml(v.travelPay ? formatMoney(v.travelPay) : "—") + "</td>" +
+        "<td class=\"num\">" + escapeHtml(v.extraPay ? formatMoney(v.extraPay) : "—") + "</td>" +
+        "<td class=\"num\">" + escapeHtml(formatMoney(visitTotal(v))) + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatDate(v.payDate)) + "</td>" +
         "<td>" + statusBadge(v.status) + "</td>" +
         "<td>" + escapeHtml(v.notes || "") + "</td>" +
@@ -600,7 +614,7 @@
 
     document.getElementById("visits-empty").hidden = filtered.length !== 0;
 
-    var totalExpected = filtered.reduce(function (s, v) { return s + (Number(v.amount) || 0); }, 0);
+    var totalExpected = filtered.reduce(function (s, v) { return s + visitTotal(v); }, 0);
     var pendingCount = filtered.filter(function (v) { return v.status === "pending"; }).length;
     document.getElementById("visits-totals").textContent =
       filtered.length + " visit(s) shown · total expected " + formatMoney(totalExpected) +
@@ -733,7 +747,7 @@
       if (p.periodStart && v.date < p.periodStart) return false;
       if (p.periodEnd && v.date > p.periodEnd) return false;
       return true;
-    }).reduce(function (s, v) { return s + (Number(v.amount) || 0); }, 0);
+    }).reduce(function (s, v) { return s + visitTotal(v); }, 0);
   }
 
   function renderPaychecks() {
@@ -781,7 +795,7 @@
       var key = v.agencyId + "|" + period.start + "|" + period.end;
       if (!groups[key]) groups[key] = { agencyId: v.agencyId, period: period, visits: [], expected: 0 };
       groups[key].visits.push(v);
-      groups[key].expected += Number(v.amount) || 0;
+      groups[key].expected += visitTotal(v);
     });
 
     var rows = Object.keys(groups).map(function (k) { return groups[k]; });
@@ -827,7 +841,7 @@
 
   function renderSummary() {
     var pendingTotal = visits.filter(function (v) { return v.status === "pending"; })
-      .reduce(function (s, v) { return s + (Number(v.amount) || 0); }, 0);
+      .reduce(function (s, v) { return s + visitTotal(v); }, 0);
     document.getElementById("stat-pending").textContent = formatMoney(pendingTotal);
 
     var varianceTotal = 0;
@@ -877,8 +891,8 @@
   }
 
   document.getElementById("export-csv-btn").addEventListener("click", function () {
-    var header = ["Date", "Agency", "Visit Type", "Expected Pay", "Pay Date", "Status", "Notes"];
-    var rows = visits.map(function (v) { return [v.date, agencyName(v.agencyId), v.visitType, v.amount, v.payDate, v.status, v.notes]; });
+    var header = ["Date", "Agency", "Visit Type", "Visit Pay", "Travel Pay", "Extra Pay", "Total", "Pay Date", "Status", "Notes"];
+    var rows = visits.map(function (v) { return [v.date, agencyName(v.agencyId), v.visitType, v.amount, v.travelPay || 0, v.extraPay || 0, visitTotal(v), v.payDate, v.status, v.notes]; });
     var csv = [header].concat(rows).map(function (row) { return row.map(csvEscape).join(","); }).join("\r\n");
     offerFile("visits-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   });
