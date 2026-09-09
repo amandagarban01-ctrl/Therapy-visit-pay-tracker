@@ -10,9 +10,12 @@ session type (e.g. "Individual 45min"), expected pay, and pay status.
 
 ## Features
 
+- **Calendar entry** — the Visits tab opens on a month calendar. Click any day
+  to add a visit for that date, or click an existing entry to edit or delete
+  it. A list of all visits (with filters by company/status) sits below the
+  calendar for bulk review.
 - **Visits** — log each billable visit: date, company/payer, session type,
   expected pay amount, expected pay date, and status (pending / paid / disputed).
-  Filter by company or status.
 - **Paychecks & Reconciliation** — log each paycheck you receive (company, date
   received, pay period start/end, actual amount, check/reference number). The
   app automatically sums the expected pay for all visits from that company
