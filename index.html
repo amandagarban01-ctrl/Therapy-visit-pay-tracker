@@ -35,6 +35,7 @@
 
   <nav class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="visits">Visits</button>
+    <button class="tab-btn" data-tab="agencies">Agencies</button>
     <button class="tab-btn" data-tab="paychecks">Paychecks &amp; Reconciliation</button>
     <button class="tab-btn" data-tab="data">Data</button>
   </nav>
@@ -64,7 +65,17 @@
       <div class="list-header">
         <h2>All visits</h2>
         <div class="filters">
-          <input type="text" id="filter-company" placeholder="Filter by company" />
+          <select id="filter-agency" class="agency-select" data-mode="all"></select>
+          <select id="filter-visit-type">
+            <option value="">All visit types</option>
+            <option>PT Evaluation</option>
+            <option>PT Visit</option>
+            <option>Reassessment</option>
+            <option>Discharge Discipline</option>
+            <option>Discharge OASIS</option>
+            <option>Recertification</option>
+            <option>OASIS</option>
+          </select>
           <select id="filter-status">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
@@ -77,7 +88,7 @@
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>Company</th><th>Session</th><th>Expected pay</th>
+              <th>Date</th><th>Agency</th><th>Visit type</th><th>Expected pay</th>
               <th>Pay date</th><th>Status</th><th>Notes</th><th></th>
             </tr>
           </thead>
@@ -105,15 +116,24 @@
           <input type="date" id="m-visit-date" required />
         </label>
 
-        <label>Company / payer
-          <input type="text" id="m-visit-company" list="company-list" placeholder="e.g. Riverbend Behavioral" required />
+        <label>Agency
+          <select id="m-visit-agency" class="agency-select" data-mode="pick" required></select>
         </label>
 
-        <label>Session type <span class="optional">(optional, no patient info)</span>
-          <input type="text" id="m-visit-session-type" placeholder="e.g. Individual 45min" />
+        <label>Visit type
+          <select id="m-visit-type" required>
+            <option value="">Select visit type…</option>
+            <option>PT Evaluation</option>
+            <option>PT Visit</option>
+            <option>Reassessment</option>
+            <option>Discharge Discipline</option>
+            <option>Discharge OASIS</option>
+            <option>Recertification</option>
+            <option>OASIS</option>
+          </select>
         </label>
 
-        <label>Expected pay per visit
+        <label>Expected pay per visit <span class="optional">(auto-fills from the agency's rate)</span>
           <input type="number" id="m-visit-amount" step="0.01" min="0" placeholder="0.00" required />
         </label>
 
@@ -142,27 +162,88 @@
     </div>
   </div>
 
+  <!-- AGENCIES -->
+  <section id="tab-agencies" class="panel">
+    <form id="agency-form" class="card form-grid">
+      <h2 class="full-width" id="agency-form-heading">Add an agency</h2>
+      <input type="hidden" id="agency-id" />
+
+      <label>Agency name
+        <input type="text" id="agency-name" placeholder="e.g. Riverbend Home Health" required />
+      </label>
+
+      <label>Pay period schedule
+        <select id="agency-schedule-type">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Biweekly (every 2 weeks)</option>
+          <option value="semimonthly" selected>Semi-monthly (1st–15th / 16th–end)</option>
+          <option value="monthly">Monthly (calendar month)</option>
+        </select>
+      </label>
+
+      <label id="agency-anchor-wrap" hidden>Any date a period starts on
+        <input type="date" id="agency-anchor" />
+      </label>
+
+      <h3 class="full-width">Standard rate per visit type <span class="optional">(optional — leave blank to always enter the amount manually)</span></h3>
+      <div class="full-width form-grid" id="agency-rate-grid"></div>
+
+      <div class="form-actions full-width">
+        <button type="submit" id="agency-submit-btn">Add agency</button>
+        <button type="button" id="agency-cancel-btn" class="secondary" hidden>Cancel edit</button>
+      </div>
+    </form>
+
+    <div class="card">
+      <h2>Agencies</h2>
+      <div id="agency-list" class="day-visit-list"></div>
+      <p id="agencies-empty" class="empty-state" hidden>No agencies yet — add one above so you can pick it when logging visits.</p>
+    </div>
+  </section>
+
   <!-- PAYCHECKS -->
   <section id="tab-paychecks" class="panel">
+    <div class="card">
+      <h2>Expected pay by period</h2>
+      <p class="hint">Every visit is grouped into its agency's pay period automatically, so you can see what you're owed before a check even arrives.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Agency</th><th>Pay period</th><th>Visits</th>
+              <th>Expected</th><th>Received</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="expected-period-tbody"></tbody>
+        </table>
+        <p id="expected-period-empty" class="empty-state" hidden>Add an agency and log a few visits to see expected pay by period here.</p>
+      </div>
+    </div>
+
     <form id="paycheck-form" class="card form-grid">
       <h2 class="full-width">Add paycheck</h2>
       <input type="hidden" id="paycheck-id" />
 
-      <label>Company / payer
-        <input type="text" id="paycheck-company" list="company-list" required />
+      <label>Agency
+        <select id="paycheck-agency" class="agency-select" data-mode="pick" required></select>
       </label>
 
       <label>Date received
         <input type="date" id="paycheck-date" required />
       </label>
 
-      <label>Pay period start
-        <input type="date" id="paycheck-period-start" required />
+      <label class="full-width">Pay period
+        <select id="paycheck-period" required></select>
       </label>
 
-      <label>Pay period end
-        <input type="date" id="paycheck-period-end" required />
-      </label>
+      <div id="paycheck-custom-range" class="full-width form-grid" hidden>
+        <label>Period start
+          <input type="date" id="paycheck-period-start-custom" />
+        </label>
+        <label>Period end
+          <input type="date" id="paycheck-period-end-custom" />
+        </label>
+      </div>
 
       <label>Actual amount received
         <input type="number" id="paycheck-amount" step="0.01" min="0" placeholder="0.00" required />
@@ -183,13 +264,13 @@
     </form>
 
     <div class="card">
-      <h2>Reconciliation</h2>
-      <p class="hint">Each paycheck is compared against the visits from the same company that fall inside its pay period.</p>
+      <h2>Paychecks logged</h2>
+      <p class="hint">Each paycheck is compared against the visits from the same agency that fall inside its pay period.</p>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Received</th><th>Company</th><th>Pay period</th>
+              <th>Received</th><th>Agency</th><th>Pay period</th>
               <th>Expected</th><th>Actual</th><th>Difference</th><th>Ref #</th><th></th>
             </tr>
           </thead>
@@ -220,8 +301,6 @@
       <button id="clear-all-btn" type="button" class="danger">Delete all data</button>
     </div>
   </section>
-
-  <datalist id="company-list"></datalist>
 
   <footer>Data stays in your browser only — nothing is sent anywhere. No patient names, dates of birth, or identifiers are collected.</footer>
 </div>

@@ -58,6 +58,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
 
   body {
     margin: 0;
@@ -352,6 +353,7 @@
   .badge-pending { background: var(--gold-tint); color: var(--gold); }
   .badge-paid { background: var(--pine-tint); color: var(--pine); }
   .badge-disputed { background: var(--rust-tint); color: var(--rust); }
+  .badge-neutral { background: var(--surface-2); color: var(--ink-muted); border: 1px solid var(--line-strong); }
 
   .diff-ok { color: var(--pine); font-weight: 600; }
   .diff-bad { color: var(--rust); font-weight: 600; }

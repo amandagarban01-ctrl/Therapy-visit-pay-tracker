@@ -3,15 +3,28 @@
 
   var VISITS_KEY = "vpt_visits_v1";
   var PAYCHECKS_KEY = "vpt_paychecks_v1";
+  var AGENCIES_KEY = "vpt_agencies_v2";
+
+  var VISIT_TYPES = ["PT Evaluation", "PT Visit", "Reassessment", "Discharge Discipline", "Discharge OASIS", "Recertification", "OASIS"];
+
+  var SCHEDULE_LABELS = {
+    weekly: "Weekly",
+    biweekly: "Biweekly (every 2 weeks)",
+    semimonthly: "Semi-monthly (1st–15th / 16th–end)",
+    monthly: "Monthly (calendar month)"
+  };
 
   function loadVisits() { try { return JSON.parse(localStorage.getItem(VISITS_KEY) || "[]"); } catch (e) { return []; } }
   function saveVisits(v) { localStorage.setItem(VISITS_KEY, JSON.stringify(v)); }
   function loadPaychecks() { try { return JSON.parse(localStorage.getItem(PAYCHECKS_KEY) || "[]"); } catch (e) { return []; } }
   function savePaychecks(p) { localStorage.setItem(PAYCHECKS_KEY, JSON.stringify(p)); }
+  function loadAgencies() { try { return JSON.parse(localStorage.getItem(AGENCIES_KEY) || "[]"); } catch (e) { return []; } }
+  function saveAgencies() { localStorage.setItem(AGENCIES_KEY, JSON.stringify(agencies)); }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
   var visits = loadVisits();
   var paychecks = loadPaychecks();
+  var agencies = loadAgencies();
 
   function formatMoney(n) {
     var v = Number(n); if (isNaN(v)) v = 0;
@@ -32,6 +45,238 @@
     return div.innerHTML;
   }
 
+  // ---------- pay-period math ----------
+
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+  function toIso(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function parseIso(iso) { var p = iso.split("-"); return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])); }
+  function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+
+  function periodForDate(agency, dateIso) {
+    var d = parseIso(dateIso);
+    var sched = (agency && agency.schedule) || { type: "monthly" };
+    if (sched.type === "monthly") {
+      return { start: toIso(new Date(d.getFullYear(), d.getMonth(), 1)), end: toIso(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    if (sched.type === "semimonthly") {
+      if (d.getDate() <= 15) {
+        return { start: toIso(new Date(d.getFullYear(), d.getMonth(), 1)), end: toIso(new Date(d.getFullYear(), d.getMonth(), 15)) };
+      }
+      return { start: toIso(new Date(d.getFullYear(), d.getMonth(), 16)), end: toIso(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    var anchor = sched.anchor ? parseIso(sched.anchor) : d;
+    var len = sched.type === "weekly" ? 7 : 14;
+    var diffDays = Math.floor((d - anchor) / 86400000);
+    var periodIndex = Math.floor(diffDays / len);
+    var start = addDays(anchor, periodIndex * len);
+    var end = addDays(start, len - 1);
+    return { start: toIso(start), end: toIso(end) };
+  }
+
+  function listAgencyPeriods(agency, monthsBack, monthsForward) {
+    var results = [];
+    var seen = {};
+    var cursor = new Date(); cursor.setDate(1); cursor.setMonth(cursor.getMonth() - monthsBack);
+    var limit = new Date(); limit.setDate(1); limit.setMonth(limit.getMonth() + monthsForward + 1);
+    while (cursor < limit) {
+      var p = periodForDate(agency, toIso(cursor));
+      var key = p.start + "|" + p.end;
+      if (!seen[key]) { seen[key] = true; results.push(p); }
+      cursor = addDays(cursor, 1);
+    }
+    results.sort(function (a, b) { return b.start.localeCompare(a.start); });
+    return results;
+  }
+
+  function formatPeriodLabel(period) {
+    var s = parseIso(period.start), e = parseIso(period.end);
+    if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
+      return s.toLocaleDateString(undefined, { month: "short" }) + " " + s.getDate() + "–" + e.getDate() + ", " + e.getFullYear();
+    }
+    return formatDate(period.start) + " – " + formatDate(period.end);
+  }
+
+  // ---------- agencies ----------
+
+  function agencyById(id) { return agencies.find(function (a) { return a.id === id; }); }
+  function agencyName(id) { var a = agencyById(id); return a ? a.name : "(deleted agency)"; }
+
+  function migrateLegacyData() {
+    var changed = false;
+    var agencyByName = {};
+    agencies.forEach(function (a) { agencyByName[a.name.trim().toLowerCase()] = a.id; });
+
+    function ensureAgencyFor(name) {
+      var key = name.trim().toLowerCase();
+      if (agencyByName[key]) return agencyByName[key];
+      var a = { id: uid(), name: name.trim(), schedule: { type: "monthly" }, rates: {} };
+      agencies.push(a);
+      agencyByName[key] = a.id;
+      changed = true;
+      return a.id;
+    }
+
+    visits.forEach(function (v) {
+      if (!v.agencyId && v.company) { v.agencyId = ensureAgencyFor(v.company); changed = true; }
+    });
+    paychecks.forEach(function (p) {
+      if (!p.agencyId && p.company) { p.agencyId = ensureAgencyFor(p.company); changed = true; }
+    });
+
+    if (changed) { saveAgencies(); saveVisits(); savePaychecks(); }
+  }
+
+  function populateAgencySelects() {
+    var sorted = agencies.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    document.querySelectorAll(".agency-select").forEach(function (sel) {
+      var prev = sel.value;
+      var mode = sel.dataset.mode;
+      sel.innerHTML = "";
+      var first = document.createElement("option");
+      first.value = "";
+      first.textContent = mode === "all" ? "All agencies" : "Select agency…";
+      sel.appendChild(first);
+      sorted.forEach(function (a) {
+        var opt = document.createElement("option");
+        opt.value = a.id; opt.textContent = a.name;
+        sel.appendChild(opt);
+      });
+      if (prev && sorted.some(function (a) { return a.id === prev; })) sel.value = prev;
+    });
+  }
+
+  var agencyForm = document.getElementById("agency-form");
+  var agencyIdField = document.getElementById("agency-id");
+  var agencyNameField = document.getElementById("agency-name");
+  var agencyScheduleType = document.getElementById("agency-schedule-type");
+  var agencyAnchorWrap = document.getElementById("agency-anchor-wrap");
+  var agencyAnchor = document.getElementById("agency-anchor");
+  var agencyRateGrid = document.getElementById("agency-rate-grid");
+  var agencySubmitBtn = document.getElementById("agency-submit-btn");
+  var agencyCancelBtn = document.getElementById("agency-cancel-btn");
+  var agencyFormHeading = document.getElementById("agency-form-heading");
+
+  function buildRateGrid(rates) {
+    agencyRateGrid.innerHTML = "";
+    VISIT_TYPES.forEach(function (type, i) {
+      var label = document.createElement("label");
+      label.innerHTML = escapeHtml(type) + ' <span class="optional">($ per visit)</span>';
+      var input = document.createElement("input");
+      input.type = "number"; input.step = "0.01"; input.min = "0"; input.placeholder = "0.00";
+      input.id = "agency-rate-" + i;
+      input.value = (rates && rates[type]) ? rates[type] : "";
+      label.appendChild(input);
+      agencyRateGrid.appendChild(label);
+    });
+  }
+
+  function readRateGridValues() {
+    var rates = {};
+    VISIT_TYPES.forEach(function (type, i) {
+      var v = parseFloat(document.getElementById("agency-rate-" + i).value);
+      if (v > 0) rates[type] = v;
+    });
+    return rates;
+  }
+
+  function toggleAgencyAnchor() {
+    var t = agencyScheduleType.value;
+    agencyAnchorWrap.hidden = !(t === "weekly" || t === "biweekly");
+  }
+  agencyScheduleType.addEventListener("change", toggleAgencyAnchor);
+
+  function resetAgencyForm() {
+    agencyForm.reset();
+    agencyIdField.value = "";
+    agencyScheduleType.value = "semimonthly";
+    toggleAgencyAnchor();
+    buildRateGrid(null);
+    agencyFormHeading.textContent = "Add an agency";
+    agencySubmitBtn.textContent = "Add agency";
+    agencyCancelBtn.hidden = true;
+  }
+
+  agencyForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var id = agencyIdField.value;
+    var scheduleType = agencyScheduleType.value;
+    var schedule = { type: scheduleType };
+    if (scheduleType === "weekly" || scheduleType === "biweekly") {
+      schedule.anchor = agencyAnchor.value || todayIso();
+    }
+    var record = { id: id || uid(), name: agencyNameField.value.trim(), schedule: schedule, rates: readRateGridValues() };
+    if (id) {
+      var idx = agencies.findIndex(function (a) { return a.id === id; });
+      if (idx !== -1) agencies[idx] = record;
+    } else { agencies.push(record); }
+    saveAgencies();
+    resetAgencyForm();
+    populateAgencySelects(); renderAgencies(); renderVisits(); renderCalendar(); renderPaychecks(); renderExpectedByPeriod(); renderSummary();
+  });
+
+  agencyCancelBtn.addEventListener("click", resetAgencyForm);
+
+  function editAgency(id) {
+    var a = agencyById(id);
+    if (!a) return;
+    agencyIdField.value = a.id;
+    agencyNameField.value = a.name;
+    agencyScheduleType.value = (a.schedule && a.schedule.type) || "monthly";
+    toggleAgencyAnchor();
+    agencyAnchor.value = (a.schedule && a.schedule.anchor) || "";
+    buildRateGrid(a.rates || {});
+    agencyFormHeading.textContent = "Edit agency";
+    agencySubmitBtn.textContent = "Save changes";
+    agencyCancelBtn.hidden = false;
+    document.querySelector('.tab-btn[data-tab="agencies"]').click();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function deleteAgency(id) {
+    var visitCount = visits.filter(function (v) { return v.agencyId === id; }).length;
+    var paycheckCount = paychecks.filter(function (p) { return p.agencyId === id; }).length;
+    var msg = "Delete this agency?";
+    if (visitCount || paycheckCount) {
+      msg += " It has " + visitCount + " visit(s) and " + paycheckCount + " paycheck(s) linked to it — those records are kept, but will show as an unknown agency.";
+    }
+    if (!confirm(msg)) return;
+    agencies = agencies.filter(function (a) { return a.id !== id; });
+    saveAgencies();
+    populateAgencySelects(); renderAgencies(); renderVisits(); renderCalendar(); renderPaychecks(); renderExpectedByPeriod(); renderSummary();
+  }
+
+  function scheduleSummaryText(agency) {
+    var label = SCHEDULE_LABELS[(agency.schedule && agency.schedule.type) || "monthly"];
+    var example = periodForDate(agency, todayIso());
+    return label + " · e.g. " + formatPeriodLabel(example);
+  }
+
+  function rateSummaryText(agency) {
+    var parts = VISIT_TYPES.filter(function (t) { return agency.rates && agency.rates[t] > 0; })
+      .map(function (t) { return t + " " + formatMoney(agency.rates[t]); });
+    return parts.length ? parts.join(" · ") : "No standard rates set — amount entered manually each visit";
+  }
+
+  function renderAgencies() {
+    var list = document.getElementById("agency-list");
+    var sorted = agencies.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    list.innerHTML = "";
+    sorted.forEach(function (a) {
+      var row = document.createElement("div");
+      row.className = "day-visit-row";
+      row.innerHTML =
+        '<div class="dv-main"><div class="dv-company">' + escapeHtml(a.name) + "</div>" +
+        '<div class="dv-meta">' + escapeHtml(scheduleSummaryText(a)) + "</div>" +
+        '<div class="dv-meta">' + escapeHtml(rateSummaryText(a)) + "</div></div>" +
+        '<div class="row-actions"><button type="button" class="icon-btn" data-agency-edit="' + a.id + '">Edit</button>' +
+        '<button type="button" class="icon-btn danger" data-agency-delete="' + a.id + '">Delete</button></div>';
+      list.appendChild(row);
+    });
+    document.getElementById("agencies-empty").hidden = sorted.length !== 0;
+    list.querySelectorAll("[data-agency-edit]").forEach(function (btn) { btn.addEventListener("click", function () { editAgency(btn.dataset.agencyEdit); }); });
+    list.querySelectorAll("[data-agency-delete]").forEach(function (btn) { btn.addEventListener("click", function () { deleteAgency(btn.dataset.agencyDelete); }); });
+  }
+
   document.querySelectorAll(".tab-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("active"); });
@@ -41,19 +286,6 @@
     });
   });
 
-  function refreshCompanyList() {
-    var companies = new Set();
-    visits.forEach(function (v) { if (v.company) companies.add(v.company); });
-    paychecks.forEach(function (p) { if (p.company) companies.add(p.company); });
-    var list = document.getElementById("company-list");
-    list.innerHTML = "";
-    Array.from(companies).sort().forEach(function (c) {
-      var opt = document.createElement("option");
-      opt.value = c;
-      list.appendChild(opt);
-    });
-  }
-
   // ---------- visit modal (add / edit, opened from the calendar or the table) ----------
 
   var modalOverlay = document.getElementById("visit-modal-overlay");
@@ -62,10 +294,27 @@
   var modalForm = document.getElementById("modal-visit-form");
   var modalFormHeading = document.getElementById("modal-form-heading");
   var mVisitId = document.getElementById("m-visit-id");
+  var mVisitAgency = document.getElementById("m-visit-agency");
+  var mVisitType = document.getElementById("m-visit-type");
+  var mVisitAmount = document.getElementById("m-visit-amount");
   var mVisitSubmitBtn = document.getElementById("m-visit-submit-btn");
   var mVisitCancelEditBtn = document.getElementById("m-visit-cancel-edit-btn");
   var mVisitDeleteBtn = document.getElementById("m-visit-delete-btn");
   var modalOpenDate = null;
+  var amountManuallyEdited = false;
+
+  mVisitAmount.addEventListener("input", function () { amountManuallyEdited = true; });
+
+  function maybeAutoFillRate() {
+    if (amountManuallyEdited) return;
+    var agency = agencyById(mVisitAgency.value);
+    var type = mVisitType.value;
+    if (agency && type && agency.rates && agency.rates[type] > 0) {
+      mVisitAmount.value = agency.rates[type];
+    }
+  }
+  mVisitAgency.addEventListener("change", maybeAutoFillRate);
+  mVisitType.addEventListener("change", maybeAutoFillRate);
 
   function weekdayLong(iso) {
     var parts = iso.split("-");
@@ -78,6 +327,7 @@
     mVisitId.value = "";
     document.getElementById("m-visit-date").value = dateIso;
     document.getElementById("m-visit-status").value = "pending";
+    amountManuallyEdited = false;
     modalFormHeading.textContent = "Add a visit";
     mVisitSubmitBtn.textContent = "Add visit";
     mVisitCancelEditBtn.hidden = true;
@@ -86,7 +336,7 @@
 
   function renderModalDayList(dateIso) {
     var dayVisits = visits.filter(function (v) { return v.date === dateIso; })
-      .sort(function (a, b) { return (a.company || "").localeCompare(b.company || ""); });
+      .sort(function (a, b) { return agencyName(a.agencyId).localeCompare(agencyName(b.agencyId)); });
     modalDayList.innerHTML = "";
     if (dayVisits.length === 0) {
       modalDayList.hidden = true;
@@ -97,8 +347,8 @@
       var row = document.createElement("div");
       row.className = "day-visit-row";
       row.innerHTML =
-        '<div class="dv-main"><div class="dv-company">' + escapeHtml(v.company) + "</div>" +
-        '<div class="dv-meta">' + escapeHtml(v.sessionType || "—") + " · " + escapeHtml(formatMoney(v.amount)) + "</div></div>" +
+        '<div class="dv-main"><div class="dv-company">' + escapeHtml(agencyName(v.agencyId)) + "</div>" +
+        '<div class="dv-meta">' + escapeHtml(v.visitType || "—") + " · " + escapeHtml(formatMoney(v.amount)) + "</div></div>" +
         statusBadge(v.status) +
         '<div class="row-actions"><button type="button" class="icon-btn" data-m-edit="' + v.id + '">Edit</button>' +
         '<button type="button" class="icon-btn danger" data-m-delete="' + v.id + '">Delete</button></div>';
@@ -123,7 +373,7 @@
     }
     modalOverlay.hidden = false;
     document.body.style.overflow = "hidden";
-    window.setTimeout(function () { document.getElementById("m-visit-company").focus(); }, 0);
+    window.setTimeout(function () { mVisitAgency.focus(); }, 0);
   }
 
   function closeModal() {
@@ -141,9 +391,10 @@
     if (!v) return;
     mVisitId.value = v.id;
     document.getElementById("m-visit-date").value = v.date || "";
-    document.getElementById("m-visit-company").value = v.company || "";
-    document.getElementById("m-visit-session-type").value = v.sessionType || "";
-    document.getElementById("m-visit-amount").value = v.amount || "";
+    mVisitAgency.value = v.agencyId || "";
+    mVisitType.value = v.visitType || "";
+    amountManuallyEdited = false;
+    mVisitAmount.value = v.amount || "";
     document.getElementById("m-visit-pay-date").value = v.payDate || "";
     document.getElementById("m-visit-status").value = v.status || "pending";
     document.getElementById("m-visit-notes").value = v.notes || "";
@@ -167,9 +418,9 @@
     var record = {
       id: id || uid(),
       date: document.getElementById("m-visit-date").value,
-      company: document.getElementById("m-visit-company").value.trim(),
-      sessionType: document.getElementById("m-visit-session-type").value.trim(),
-      amount: parseFloat(document.getElementById("m-visit-amount").value) || 0,
+      agencyId: mVisitAgency.value,
+      visitType: mVisitType.value,
+      amount: parseFloat(mVisitAmount.value) || 0,
       payDate: document.getElementById("m-visit-pay-date").value,
       status: document.getElementById("m-visit-status").value,
       notes: document.getElementById("m-visit-notes").value.trim()
@@ -179,7 +430,7 @@
       if (idx !== -1) visits[idx] = record;
     } else { visits.push(record); }
     saveVisits(visits);
-    refreshCompanyList(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar();
+    renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
     var stayDate = record.date;
     resetModalForm(stayDate);
     renderModalDayList(stayDate);
@@ -196,7 +447,7 @@
     if (!confirm("Delete this visit? This cannot be undone.")) return;
     var wasOpenDate = modalOpenDate;
     visits = visits.filter(function (v) { return v.id !== id; });
-    saveVisits(visits); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar();
+    saveVisits(visits); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
     if (keepModalOpen && wasOpenDate) {
       resetModalForm(wasOpenDate);
       renderModalDayList(wasOpenDate);
@@ -262,7 +513,8 @@
         var chip = document.createElement("button");
         chip.type = "button";
         chip.className = "cal-chip chip-" + v.status;
-        chip.textContent = v.company + " · " + formatMoney(v.amount);
+        chip.textContent = agencyName(v.agencyId) + " · " + formatMoney(v.amount);
+        chip.title = agencyName(v.agencyId) + " — " + (v.visitType || "Unspecified visit type") + " — " + formatMoney(v.amount);
         chip.addEventListener("click", function (e) {
           e.stopPropagation();
           openDayModal(cellIso, v.id);
@@ -316,11 +568,13 @@
 
   function renderVisits() {
     var tbody = document.getElementById("visits-tbody");
-    var companyFilter = document.getElementById("filter-company").value.trim().toLowerCase();
+    var agencyFilter = document.getElementById("filter-agency").value;
+    var typeFilter = document.getElementById("filter-visit-type").value;
     var statusFilter = document.getElementById("filter-status").value;
 
     var filtered = visits.filter(function (v) {
-      if (companyFilter && (v.company || "").toLowerCase().indexOf(companyFilter) === -1) return false;
+      if (agencyFilter && v.agencyId !== agencyFilter) return false;
+      if (typeFilter && v.visitType !== typeFilter) return false;
       if (statusFilter && v.status !== statusFilter) return false;
       return true;
     });
@@ -331,8 +585,8 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td class=\"num\">" + escapeHtml(formatDate(v.date)) + "</td>" +
-        "<td>" + escapeHtml(v.company) + "</td>" +
-        "<td>" + escapeHtml(v.sessionType || "—") + "</td>" +
+        "<td>" + escapeHtml(agencyName(v.agencyId)) + "</td>" +
+        "<td>" + escapeHtml(v.visitType || "—") + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatMoney(v.amount)) + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatDate(v.payDate)) + "</td>" +
         "<td>" + statusBadge(v.status) + "</td>" +
@@ -356,28 +610,87 @@
     tbody.querySelectorAll("[data-delete]").forEach(function (btn) { btn.addEventListener("click", function () { deleteVisit(btn.dataset.delete); }); });
   }
 
-  document.getElementById("filter-company").addEventListener("input", renderVisits);
+  document.getElementById("filter-agency").addEventListener("change", renderVisits);
+  document.getElementById("filter-visit-type").addEventListener("change", renderVisits);
   document.getElementById("filter-status").addEventListener("change", renderVisits);
 
   var paycheckForm = document.getElementById("paycheck-form");
   var paycheckIdField = document.getElementById("paycheck-id");
   var paycheckSubmitBtn = document.getElementById("paycheck-submit-btn");
   var paycheckCancelBtn = document.getElementById("paycheck-cancel-btn");
+  var paycheckAgencySelect = document.getElementById("paycheck-agency");
+  var paycheckPeriodSelect = document.getElementById("paycheck-period");
+  var paycheckCustomRange = document.getElementById("paycheck-custom-range");
+  var paycheckPeriodStartCustom = document.getElementById("paycheck-period-start-custom");
+  var paycheckPeriodEndCustom = document.getElementById("paycheck-period-end-custom");
+
+  function populatePaycheckPeriods(selectedRange) {
+    var agency = agencyById(paycheckAgencySelect.value);
+    paycheckPeriodSelect.innerHTML = "";
+    if (!agency) {
+      var opt0 = document.createElement("option");
+      opt0.value = ""; opt0.textContent = "Select an agency first";
+      paycheckPeriodSelect.appendChild(opt0);
+      paycheckCustomRange.hidden = true;
+      return;
+    }
+    var periods = listAgencyPeriods(agency, 4, 2);
+    periods.forEach(function (p) {
+      var opt = document.createElement("option");
+      opt.value = p.start + "|" + p.end;
+      opt.textContent = formatPeriodLabel(p);
+      paycheckPeriodSelect.appendChild(opt);
+    });
+    var customOpt = document.createElement("option");
+    customOpt.value = "custom";
+    customOpt.textContent = "Custom range…";
+    paycheckPeriodSelect.appendChild(customOpt);
+
+    if (selectedRange) {
+      var key = selectedRange.start + "|" + selectedRange.end;
+      var matched = Array.prototype.some.call(paycheckPeriodSelect.options, function (o) { return o.value === key; });
+      if (matched) {
+        paycheckPeriodSelect.value = key;
+        paycheckCustomRange.hidden = true;
+      } else {
+        paycheckPeriodSelect.value = "custom";
+        paycheckCustomRange.hidden = false;
+        paycheckPeriodStartCustom.value = selectedRange.start;
+        paycheckPeriodEndCustom.value = selectedRange.end;
+      }
+    } else {
+      paycheckCustomRange.hidden = true;
+    }
+  }
+
+  paycheckAgencySelect.addEventListener("change", function () { populatePaycheckPeriods(null); });
+  paycheckPeriodSelect.addEventListener("change", function () {
+    paycheckCustomRange.hidden = paycheckPeriodSelect.value !== "custom";
+  });
 
   function resetPaycheckForm() {
     paycheckForm.reset(); paycheckIdField.value = "";
+    populatePaycheckPeriods(null);
     paycheckSubmitBtn.textContent = "Add paycheck"; paycheckCancelBtn.hidden = true;
   }
 
   paycheckForm.addEventListener("submit", function (e) {
     e.preventDefault();
     var id = paycheckIdField.value;
+    var periodStart, periodEnd;
+    if (paycheckPeriodSelect.value === "custom") {
+      periodStart = paycheckPeriodStartCustom.value;
+      periodEnd = paycheckPeriodEndCustom.value;
+    } else {
+      var parts = paycheckPeriodSelect.value.split("|");
+      periodStart = parts[0]; periodEnd = parts[1];
+    }
     var record = {
       id: id || uid(),
-      company: document.getElementById("paycheck-company").value.trim(),
+      agencyId: paycheckAgencySelect.value,
       dateReceived: document.getElementById("paycheck-date").value,
-      periodStart: document.getElementById("paycheck-period-start").value,
-      periodEnd: document.getElementById("paycheck-period-end").value,
+      periodStart: periodStart,
+      periodEnd: periodEnd,
       amount: parseFloat(document.getElementById("paycheck-amount").value) || 0,
       ref: document.getElementById("paycheck-ref").value.trim(),
       notes: document.getElementById("paycheck-notes").value.trim()
@@ -388,7 +701,7 @@
     } else { paychecks.push(record); }
     savePaychecks(paychecks);
     resetPaycheckForm();
-    refreshCompanyList(); renderPaychecks(); renderSummary();
+    renderPaychecks(); renderSummary(); renderExpectedByPeriod();
   });
 
   paycheckCancelBtn.addEventListener("click", resetPaycheckForm);
@@ -397,10 +710,9 @@
     var p = paychecks.find(function (x) { return x.id === id; });
     if (!p) return;
     paycheckIdField.value = p.id;
-    document.getElementById("paycheck-company").value = p.company || "";
+    paycheckAgencySelect.value = p.agencyId || "";
+    populatePaycheckPeriods({ start: p.periodStart, end: p.periodEnd });
     document.getElementById("paycheck-date").value = p.dateReceived || "";
-    document.getElementById("paycheck-period-start").value = p.periodStart || "";
-    document.getElementById("paycheck-period-end").value = p.periodEnd || "";
     document.getElementById("paycheck-amount").value = p.amount || "";
     document.getElementById("paycheck-ref").value = p.ref || "";
     document.getElementById("paycheck-notes").value = p.notes || "";
@@ -411,12 +723,12 @@
   function deletePaycheck(id) {
     if (!confirm("Delete this paycheck record? This cannot be undone.")) return;
     paychecks = paychecks.filter(function (p) { return p.id !== id; });
-    savePaychecks(paychecks); renderPaychecks(); renderSummary();
+    savePaychecks(paychecks); renderPaychecks(); renderSummary(); renderExpectedByPeriod();
   }
 
   function expectedForPaycheck(p) {
     return visits.filter(function (v) {
-      if ((v.company || "").trim().toLowerCase() !== (p.company || "").trim().toLowerCase()) return false;
+      if (v.agencyId !== p.agencyId) return false;
       if (!v.date) return false;
       if (p.periodStart && v.date < p.periodStart) return false;
       if (p.periodEnd && v.date > p.periodEnd) return false;
@@ -439,7 +751,7 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td class=\"num\">" + escapeHtml(formatDate(p.dateReceived)) + "</td>" +
-        "<td>" + escapeHtml(p.company) + "</td>" +
+        "<td>" + escapeHtml(agencyName(p.agencyId)) + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatDate(p.periodStart)) + " – " + escapeHtml(formatDate(p.periodEnd)) + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatMoney(expected)) + "</td>" +
         "<td class=\"num\">" + escapeHtml(formatMoney(actual)) + "</td>" +
@@ -456,6 +768,61 @@
 
     tbody.querySelectorAll("[data-edit-pc]").forEach(function (btn) { btn.addEventListener("click", function () { editPaycheck(btn.dataset.editPc); }); });
     tbody.querySelectorAll("[data-delete-pc]").forEach(function (btn) { btn.addEventListener("click", function () { deletePaycheck(btn.dataset.deletePc); }); });
+  }
+
+  function renderExpectedByPeriod() {
+    var tbody = document.getElementById("expected-period-tbody");
+    var groups = {};
+    visits.forEach(function (v) {
+      if (!v.agencyId || !v.date) return;
+      var agency = agencyById(v.agencyId);
+      if (!agency) return;
+      var period = periodForDate(agency, v.date);
+      var key = v.agencyId + "|" + period.start + "|" + period.end;
+      if (!groups[key]) groups[key] = { agencyId: v.agencyId, period: period, visits: [], expected: 0 };
+      groups[key].visits.push(v);
+      groups[key].expected += Number(v.amount) || 0;
+    });
+
+    var rows = Object.keys(groups).map(function (k) { return groups[k]; });
+    rows.forEach(function (g) {
+      var matching = paychecks.filter(function (p) {
+        return p.agencyId === g.agencyId && p.periodStart === g.period.start && p.periodEnd === g.period.end;
+      });
+      g.received = matching.reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
+      g.hasPaycheck = matching.length > 0;
+    });
+
+    rows.sort(function (a, b) {
+      var an = agencyName(a.agencyId), bn = agencyName(b.agencyId);
+      if (an !== bn) return an.localeCompare(bn);
+      return b.period.start.localeCompare(a.period.start);
+    });
+
+    tbody.innerHTML = "";
+    rows.forEach(function (g) {
+      var diff = g.received - g.expected;
+      var statusHtml;
+      if (!g.hasPaycheck) {
+        statusHtml = '<span class="badge badge-neutral">Not yet received</span>';
+      } else if (Math.abs(diff) < 0.005) {
+        statusHtml = '<span class="badge badge-paid">Paid in full</span>';
+      } else if (diff < 0) {
+        statusHtml = '<span class="badge badge-disputed">Short ' + escapeHtml(formatMoney(Math.abs(diff))) + '</span>';
+      } else {
+        statusHtml = '<span class="badge badge-pending">Over ' + escapeHtml(formatMoney(diff)) + '</span>';
+      }
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + escapeHtml(agencyName(g.agencyId)) + "</td>" +
+        "<td class=\"num\">" + escapeHtml(formatPeriodLabel(g.period)) + "</td>" +
+        "<td class=\"num\">" + g.visits.length + "</td>" +
+        "<td class=\"num\">" + escapeHtml(formatMoney(g.expected)) + "</td>" +
+        "<td class=\"num\">" + escapeHtml(formatMoney(g.received)) + "</td>" +
+        "<td>" + statusHtml + "</td>";
+      tbody.appendChild(tr);
+    });
+    document.getElementById("expected-period-empty").hidden = rows.length !== 0;
   }
 
   function renderSummary() {
@@ -498,7 +865,7 @@
   }
 
   document.getElementById("export-btn").addEventListener("click", function () {
-    var payload = { exportedAt: new Date().toISOString(), visits: visits, paychecks: paychecks };
+    var payload = { exportedAt: new Date().toISOString(), agencies: agencies, visits: visits, paychecks: paychecks };
     offerFile("visit-pay-tracker-backup-" + new Date().toISOString().slice(0, 10) + ".json",
       JSON.stringify(payload, null, 2), "application/json");
   });
@@ -510,8 +877,8 @@
   }
 
   document.getElementById("export-csv-btn").addEventListener("click", function () {
-    var header = ["Date", "Company", "Session Type", "Expected Pay", "Pay Date", "Status", "Notes"];
-    var rows = visits.map(function (v) { return [v.date, v.company, v.sessionType, v.amount, v.payDate, v.status, v.notes]; });
+    var header = ["Date", "Agency", "Visit Type", "Expected Pay", "Pay Date", "Status", "Notes"];
+    var rows = visits.map(function (v) { return [v.date, agencyName(v.agencyId), v.visitType, v.amount, v.payDate, v.status, v.notes]; });
     var csv = [header].concat(rows).map(function (row) { return row.map(csvEscape).join(","); }).join("\r\n");
     offerFile("visits-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   });
@@ -525,9 +892,12 @@
         var data = JSON.parse(reader.result);
         if (!Array.isArray(data.visits) || !Array.isArray(data.paychecks)) throw new Error("Invalid backup file format.");
         if (!confirm("Import will replace all current data in this browser with the backup contents. Continue?")) { e.target.value = ""; return; }
+        agencies = Array.isArray(data.agencies) ? data.agencies : [];
         visits = data.visits; paychecks = data.paychecks;
-        saveVisits(visits); savePaychecks(paychecks);
-        refreshCompanyList(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar();
+        migrateLegacyData();
+        saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
+        populateAgencySelects(); renderAgencies(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+        resetPaycheckForm();
         showDataMessage("Backup imported successfully.");
       } catch (err) { showDataMessage("Import failed: " + err.message); }
       e.target.value = "";
@@ -536,13 +906,19 @@
   });
 
   document.getElementById("clear-all-btn").addEventListener("click", function () {
-    if (!confirm("This will permanently delete ALL visits and paychecks from this browser. Export a backup first if you want to keep a copy. Continue?")) return;
+    if (!confirm("This will permanently delete ALL agencies, visits and paychecks from this browser. Export a backup first if you want to keep a copy. Continue?")) return;
     if (!confirm("Are you absolutely sure? This cannot be undone.")) return;
-    visits = []; paychecks = [];
-    saveVisits(visits); savePaychecks(paychecks);
-    refreshCompanyList(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar();
+    agencies = []; visits = []; paychecks = [];
+    saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
+    populateAgencySelects(); renderAgencies(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+    resetPaycheckForm();
     showDataMessage("All data deleted.");
   });
 
-  refreshCompanyList(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar();
+  migrateLegacyData();
+  populateAgencySelects();
+  resetAgencyForm();
+  renderAgencies();
+  resetPaycheckForm();
+  renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
 })();
