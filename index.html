@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visit Pay Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Visit Pay Tracker</h1>
+    <p class="tagline">Track visits, expected pay, and reconcile against your paychecks — no patient info stored.</p>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="visits">Visits</button>
+    <button class="tab-btn" data-tab="paychecks">Paychecks &amp; Reconciliation</button>
+    <button class="tab-btn" data-tab="data">Data</button>
+  </nav>
+
+  <main>
+    <!-- VISITS TAB -->
+    <section id="tab-visits" class="tab-panel active">
+      <form id="visit-form" class="card form-grid">
+        <h2>Add Visit</h2>
+        <input type="hidden" id="visit-id" />
+
+        <label>
+          Visit date
+          <input type="date" id="visit-date" required />
+        </label>
+
+        <label>
+          Company / Payer
+          <input type="text" id="visit-company" list="company-list" placeholder="e.g. Acme Health Group" required />
+        </label>
+
+        <label>
+          Session type <span class="optional">(optional — no patient info)</span>
+          <input type="text" id="visit-session-type" placeholder="e.g. Individual 45min" />
+        </label>
+
+        <label>
+          Expected pay per visit ($)
+          <input type="number" id="visit-amount" step="0.01" min="0" required />
+        </label>
+
+        <label>
+          Expected pay date <span class="optional">(if known)</span>
+          <input type="date" id="visit-pay-date" />
+        </label>
+
+        <label>
+          Status
+          <select id="visit-status">
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="disputed">Disputed</option>
+          </select>
+        </label>
+
+        <label class="full-width">
+          Notes <span class="optional">(no patient names or identifiers)</span>
+          <textarea id="visit-notes" rows="2" placeholder="e.g. telehealth, sliding scale, etc."></textarea>
+        </label>
+
+        <div class="form-actions full-width">
+          <button type="submit" id="visit-submit-btn">Add Visit</button>
+          <button type="button" id="visit-cancel-btn" class="secondary" hidden>Cancel Edit</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <div class="list-header">
+          <h2>Visits</h2>
+          <div class="filters">
+            <input type="text" id="filter-company" placeholder="Filter by company" />
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="disputed">Disputed</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="visits-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Company</th>
+                <th>Session</th>
+                <th>Expected Pay</th>
+                <th>Pay Date</th>
+                <th>Status</th>
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="visits-tbody"></tbody>
+          </table>
+          <p id="visits-empty" class="empty-state" hidden>No visits yet. Add your first visit above.</p>
+        </div>
+        <div class="totals" id="visits-totals"></div>
+      </div>
+    </section>
+
+    <!-- PAYCHECKS TAB -->
+    <section id="tab-paychecks" class="tab-panel">
+      <form id="paycheck-form" class="card form-grid">
+        <h2>Add Paycheck</h2>
+        <input type="hidden" id="paycheck-id" />
+
+        <label>
+          Company / Payer
+          <input type="text" id="paycheck-company" list="company-list" required />
+        </label>
+
+        <label>
+          Date received
+          <input type="date" id="paycheck-date" required />
+        </label>
+
+        <label>
+          Pay period start
+          <input type="date" id="paycheck-period-start" required />
+        </label>
+
+        <label>
+          Pay period end
+          <input type="date" id="paycheck-period-end" required />
+        </label>
+
+        <label>
+          Actual amount received ($)
+          <input type="number" id="paycheck-amount" step="0.01" min="0" required />
+        </label>
+
+        <label>
+          Check / reference #
+          <input type="text" id="paycheck-ref" placeholder="optional" />
+        </label>
+
+        <label class="full-width">
+          Notes
+          <textarea id="paycheck-notes" rows="2"></textarea>
+        </label>
+
+        <div class="form-actions full-width">
+          <button type="submit" id="paycheck-submit-btn">Add Paycheck</button>
+          <button type="button" id="paycheck-cancel-btn" class="secondary" hidden>Cancel Edit</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <h2>Reconciliation</h2>
+        <p class="hint">Each paycheck is compared to the visits from the same company that fall within its pay period.</p>
+        <div class="table-wrap">
+          <table id="paychecks-table">
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Company</th>
+                <th>Pay Period</th>
+                <th>Expected (visits)</th>
+                <th>Actual Received</th>
+                <th>Difference</th>
+                <th>Ref #</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="paychecks-tbody"></tbody>
+          </table>
+          <p id="paychecks-empty" class="empty-state" hidden>No paychecks logged yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- DATA TAB -->
+    <section id="tab-data" class="tab-panel">
+      <div class="card">
+        <h2>Backup &amp; Restore</h2>
+        <p class="hint">All data is stored only in this browser (localStorage). Export a backup regularly, or move data to another device.</p>
+        <div class="form-actions">
+          <button id="export-btn" type="button">Export JSON Backup</button>
+          <button id="export-csv-btn" type="button" class="secondary">Export Visits as CSV</button>
+          <label class="import-label secondary" for="import-input">Import JSON Backup</label>
+          <input type="file" id="import-input" accept="application/json" hidden />
+        </div>
+        <p id="data-message" class="hint"></p>
+      </div>
+
+      <div class="card danger-zone">
+        <h2>Danger Zone</h2>
+        <p class="hint">Permanently deletes all visits and paychecks from this browser. This cannot be undone — export a backup first.</p>
+        <button id="clear-all-btn" type="button" class="danger">Delete All Data</button>
+      </div>
+    </section>
+  </main>
+
+  <datalist id="company-list"></datalist>
+
+  <footer>
+    <p>Data stays in your browser only — nothing is sent anywhere. No patient names, dates of birth, or identifiers are collected by this app.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
