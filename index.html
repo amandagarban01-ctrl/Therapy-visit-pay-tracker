@@ -15,8 +15,10 @@
       <h1>Visit Pay Tracker</h1>
       <p class="tagline">Log each visit's expected pay, then reconcile it against the paychecks that actually land.</p>
     </div>
-    <span class="privacy-note">No patient data · stored only in this browser</span>
+    <span class="privacy-note">No patient data · private to you</span>
   </header>
+
+  <p id="storage-status" class="hint" hidden></p>
 
   <div class="summary" id="summary-strip">
     <div class="stat">
@@ -171,6 +173,17 @@
     </div>
   </div>
 
+  <!-- PAYSTUB LIGHTBOX -->
+  <div class="modal-overlay" id="paystub-lightbox-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Paystub photo</h2>
+        <button type="button" class="icon-btn" id="paystub-lightbox-close" aria-label="Close">Close ×</button>
+      </div>
+      <img id="paystub-lightbox-img" class="lightbox-img" alt="Paystub photo" />
+    </div>
+  </div>
+
   <!-- AGENCIES -->
   <section id="tab-agencies" class="panel">
     <form id="agency-form" class="card form-grid">
@@ -262,6 +275,16 @@
         <input type="text" id="paycheck-ref" placeholder="optional" />
       </label>
 
+      <div class="full-width" id="paycheck-paystub-wrap" hidden>
+        <label>Paystub photo <span class="optional">(optional — a visual reference only, not read automatically)</span>
+          <input type="file" id="paycheck-paystub-input" accept="image/*" />
+        </label>
+        <div id="paycheck-paystub-preview" class="paystub-preview" hidden>
+          <img id="paycheck-paystub-img" alt="Paystub preview" />
+          <button type="button" id="paycheck-paystub-remove-btn" class="secondary">Remove photo</button>
+        </div>
+      </div>
+
       <label class="full-width">Notes
         <textarea id="paycheck-notes" rows="2"></textarea>
       </label>
@@ -280,7 +303,7 @@
           <thead>
             <tr>
               <th>Received</th><th>Agency</th><th>Pay period</th>
-              <th>Expected</th><th>Actual</th><th>Difference</th><th>Ref #</th><th></th>
+              <th>Expected</th><th>Actual</th><th>Difference</th><th>Ref #</th><th>Paystub</th><th></th>
             </tr>
           </thead>
           <tbody id="paychecks-tbody"></tbody>
@@ -294,7 +317,7 @@
   <section id="tab-data" class="panel">
     <div class="card">
       <h2>Backup &amp; restore</h2>
-      <p class="hint">All data lives only in this browser's local storage. Export a backup regularly, or to move data to another device.</p>
+      <p class="hint">Your agencies, visits, and paychecks save automatically as you go. Export a backup any time as an extra copy, or to move your data elsewhere.</p>
       <div class="form-actions">
         <button id="export-btn" type="button">Export JSON backup</button>
         <button id="export-csv-btn" type="button" class="secondary">Export visits as CSV</button>
@@ -306,12 +329,12 @@
 
     <div class="card danger-zone">
       <h2>Danger zone</h2>
-      <p class="hint">Permanently deletes all visits and paychecks from this browser. Export a backup first — this can't be undone.</p>
+      <p class="hint">Permanently deletes all agencies, visits, and paychecks (including paystub photos). Export a backup first — this can't be undone.</p>
       <button id="clear-all-btn" type="button" class="danger">Delete all data</button>
     </div>
   </section>
 
-  <footer>Data stays in your browser only — nothing is sent anywhere. No patient names, dates of birth, or identifiers are collected.</footer>
+  <footer>No patient names, dates of birth, or identifiers are collected. Your entries are private to you and never shared.</footer>
 </div>
 
 <script src="app.js"></script>

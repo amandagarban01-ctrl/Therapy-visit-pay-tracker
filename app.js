@@ -26,6 +26,38 @@
   var paychecks = loadPaychecks();
   var agencies = loadAgencies();
 
+  var storageMode = "local";
+  var dbApi = null;
+  var assetsApi = null;
+
+  var storageStatusEl = document.getElementById("storage-status");
+  function setStorageStatus(text, warn) {
+    if (!text) { storageStatusEl.hidden = true; return; }
+    storageStatusEl.textContent = text;
+    storageStatusEl.className = warn ? "hint hint-warn" : "hint";
+    storageStatusEl.hidden = false;
+  }
+
+  function docToRecord(doc) {
+    var data = doc.data() || {};
+    data.id = doc.id;
+    return data;
+  }
+
+  function pushToDb(collectionName, record) {
+    if (storageMode !== "db" || !dbApi) return;
+    dbApi.collection(collectionName).doc(record.id).set(record).catch(function (err) {
+      showDataMessage("Couldn't sync to cloud storage: " + (err && err.message ? err.message : "unknown error"));
+    });
+  }
+
+  function deleteFromDb(collectionName, id) {
+    if (storageMode !== "db" || !dbApi) return;
+    dbApi.collection(collectionName).doc(id).delete().catch(function (err) {
+      showDataMessage("Couldn't sync deletion to cloud storage: " + (err && err.message ? err.message : "unknown error"));
+    });
+  }
+
   function formatMoney(n) {
     var v = Number(n); if (isNaN(v)) v = 0;
     return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -214,8 +246,9 @@
       if (idx !== -1) agencies[idx] = record;
     } else { agencies.push(record); }
     saveAgencies();
+    pushToDb("agencies", record);
     resetAgencyForm();
-    populateAgencySelects(); renderAgencies(); renderVisits(); renderCalendar(); renderPaychecks(); renderExpectedByPeriod(); renderSummary();
+    renderAll();
   });
 
   agencyCancelBtn.addEventListener("click", resetAgencyForm);
@@ -246,7 +279,8 @@
     if (!confirm(msg)) return;
     agencies = agencies.filter(function (a) { return a.id !== id; });
     saveAgencies();
-    populateAgencySelects(); renderAgencies(); renderVisits(); renderCalendar(); renderPaychecks(); renderExpectedByPeriod(); renderSummary();
+    deleteFromDb("agencies", id);
+    renderAll();
   }
 
   function scheduleSummaryText(agency) {
@@ -440,7 +474,8 @@
       if (idx !== -1) visits[idx] = record;
     } else { visits.push(record); }
     saveVisits(visits);
-    renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+    pushToDb("visits", record);
+    renderAll();
     var stayDate = record.date;
     resetModalForm(stayDate);
     renderModalDayList(stayDate);
@@ -457,7 +492,9 @@
     if (!confirm("Delete this visit? This cannot be undone.")) return;
     var wasOpenDate = modalOpenDate;
     visits = visits.filter(function (v) { return v.id !== id; });
-    saveVisits(visits); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+    saveVisits(visits);
+    deleteFromDb("visits", id);
+    renderAll();
     if (keepModalOpen && wasOpenDate) {
       resetModalForm(wasOpenDate);
       renderModalDayList(wasOpenDate);
@@ -637,6 +674,60 @@
   var paycheckCustomRange = document.getElementById("paycheck-custom-range");
   var paycheckPeriodStartCustom = document.getElementById("paycheck-period-start-custom");
   var paycheckPeriodEndCustom = document.getElementById("paycheck-period-end-custom");
+  var paycheckPaystubWrap = document.getElementById("paycheck-paystub-wrap");
+  var paycheckPaystubInput = document.getElementById("paycheck-paystub-input");
+  var paycheckPaystubPreview = document.getElementById("paycheck-paystub-preview");
+  var paycheckPaystubImg = document.getElementById("paycheck-paystub-img");
+  var paycheckPaystubRemoveBtn = document.getElementById("paycheck-paystub-remove-btn");
+  var pendingPaystubAssetId = null;
+  var pendingPaystubOldAssetId = null;
+
+  function toggleAssetsUi() {
+    if (paycheckPaystubWrap) paycheckPaystubWrap.hidden = !assetsApi;
+  }
+
+  function showPaystubPreview(assetId) {
+    if (!assetId) { paycheckPaystubPreview.hidden = true; return; }
+    paycheckPaystubImg.src = "/_blob/" + assetId;
+    paycheckPaystubPreview.hidden = false;
+  }
+
+  paycheckPaystubInput.addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    paycheckPaystubInput.value = "";
+    if (!file) return;
+    if (!assetsApi) { showDataMessage("Photo uploads need cloud storage, which isn't available right now."); return; }
+    showDataMessage("Uploading paystub photo…");
+    assetsApi.upload(file).then(function (res) {
+      if (pendingPaystubAssetId && pendingPaystubAssetId !== res.id) pendingPaystubOldAssetId = pendingPaystubAssetId;
+      pendingPaystubAssetId = res.id;
+      showPaystubPreview(res.id);
+      showDataMessage("Photo attached — save the paycheck to keep it.");
+    }).catch(function (err) {
+      showDataMessage("Photo upload failed: " + (err && err.message ? err.message : "unknown error"));
+    });
+  });
+
+  paycheckPaystubRemoveBtn.addEventListener("click", function () {
+    if (pendingPaystubAssetId) pendingPaystubOldAssetId = pendingPaystubAssetId;
+    pendingPaystubAssetId = null;
+    showPaystubPreview(null);
+  });
+
+  var paystubLightboxOverlay = document.getElementById("paystub-lightbox-overlay");
+  var paystubLightboxImg = document.getElementById("paystub-lightbox-img");
+  function openPaystubLightbox(assetId) {
+    paystubLightboxImg.src = "/_blob/" + assetId;
+    paystubLightboxOverlay.hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+  function closePaystubLightbox() {
+    paystubLightboxOverlay.hidden = true;
+    document.body.style.overflow = "";
+  }
+  document.getElementById("paystub-lightbox-close").addEventListener("click", closePaystubLightbox);
+  paystubLightboxOverlay.addEventListener("click", function (e) { if (e.target === paystubLightboxOverlay) closePaystubLightbox(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !paystubLightboxOverlay.hidden) closePaystubLightbox(); });
 
   function populatePaycheckPeriods(selectedRange) {
     var agency = agencyById(paycheckAgencySelect.value);
@@ -685,6 +776,9 @@
   function resetPaycheckForm() {
     paycheckForm.reset(); paycheckIdField.value = "";
     populatePaycheckPeriods(null);
+    pendingPaystubAssetId = null;
+    pendingPaystubOldAssetId = null;
+    showPaystubPreview(null);
     paycheckSubmitBtn.textContent = "Add paycheck"; paycheckCancelBtn.hidden = true;
   }
 
@@ -707,13 +801,18 @@
       periodEnd: periodEnd,
       amount: parseFloat(document.getElementById("paycheck-amount").value) || 0,
       ref: document.getElementById("paycheck-ref").value.trim(),
-      notes: document.getElementById("paycheck-notes").value.trim()
+      notes: document.getElementById("paycheck-notes").value.trim(),
+      paystubAssetId: pendingPaystubAssetId || null
     };
     if (id) {
       var idx = paychecks.findIndex(function (p) { return p.id === id; });
       if (idx !== -1) paychecks[idx] = record;
     } else { paychecks.push(record); }
     savePaychecks(paychecks);
+    pushToDb("paychecks", record);
+    if (pendingPaystubOldAssetId && assetsApi) {
+      assetsApi.delete(pendingPaystubOldAssetId).catch(function () {});
+    }
     resetPaycheckForm();
     renderPaychecks(); renderSummary(); renderExpectedByPeriod();
   });
@@ -730,14 +829,21 @@
     document.getElementById("paycheck-amount").value = p.amount || "";
     document.getElementById("paycheck-ref").value = p.ref || "";
     document.getElementById("paycheck-notes").value = p.notes || "";
+    pendingPaystubAssetId = p.paystubAssetId || null;
+    pendingPaystubOldAssetId = null;
+    showPaystubPreview(pendingPaystubAssetId);
     paycheckSubmitBtn.textContent = "Save changes"; paycheckCancelBtn.hidden = false;
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function deletePaycheck(id) {
     if (!confirm("Delete this paycheck record? This cannot be undone.")) return;
-    paychecks = paychecks.filter(function (p) { return p.id !== id; });
-    savePaychecks(paychecks); renderPaychecks(); renderSummary(); renderExpectedByPeriod();
+    var p = paychecks.find(function (x) { return x.id === id; });
+    paychecks = paychecks.filter(function (x) { return x.id !== id; });
+    savePaychecks(paychecks);
+    deleteFromDb("paychecks", id);
+    if (p && p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
+    renderPaychecks(); renderSummary(); renderExpectedByPeriod();
   }
 
   function expectedForPaycheck(p) {
@@ -771,6 +877,9 @@
         "<td class=\"num\">" + escapeHtml(formatMoney(actual)) + "</td>" +
         '<td class="num ' + diffClass + '">' + escapeHtml(diffLabel) + "</td>" +
         "<td>" + escapeHtml(p.ref || "—") + "</td>" +
+        "<td>" + (p.paystubAssetId ?
+          '<button type="button" class="paystub-thumb-btn" data-view-paystub="' + p.paystubAssetId + '"><img src="/_blob/' + p.paystubAssetId + '" alt="Paystub" /></button>' :
+          "—") + "</td>" +
         '<td class="row-actions">' +
         '<button type="button" class="icon-btn" data-edit-pc="' + p.id + '">Edit</button>' +
         '<button type="button" class="icon-btn danger" data-delete-pc="' + p.id + '">Delete</button>' +
@@ -779,6 +888,10 @@
     });
 
     document.getElementById("paychecks-empty").hidden = sorted.length !== 0;
+
+    tbody.querySelectorAll("[data-view-paystub]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openPaystubLightbox(btn.dataset.viewPaystub); });
+    });
 
     tbody.querySelectorAll("[data-edit-pc]").forEach(function (btn) { btn.addEventListener("click", function () { editPaycheck(btn.dataset.editPc); }); });
     tbody.querySelectorAll("[data-delete-pc]").forEach(function (btn) { btn.addEventListener("click", function () { deletePaycheck(btn.dataset.deletePc); }); });
@@ -862,6 +975,16 @@
     openEl.className = "value " + (openItems === 0 ? "ok" : "bad");
   }
 
+  function renderAll() {
+    populateAgencySelects();
+    renderAgencies();
+    renderVisits();
+    renderCalendar();
+    renderPaychecks();
+    renderExpectedByPeriod();
+    renderSummary();
+  }
+
   var dataMessage = document.getElementById("data-message");
   function showDataMessage(msg) {
     dataMessage.textContent = msg;
@@ -905,12 +1028,21 @@
       try {
         var data = JSON.parse(reader.result);
         if (!Array.isArray(data.visits) || !Array.isArray(data.paychecks)) throw new Error("Invalid backup file format.");
-        if (!confirm("Import will replace all current data in this browser with the backup contents. Continue?")) { e.target.value = ""; return; }
+        if (!confirm("Import will replace all current data with the backup contents. Continue?")) { e.target.value = ""; return; }
+        var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
         agencies = Array.isArray(data.agencies) ? data.agencies : [];
         visits = data.visits; paychecks = data.paychecks;
         migrateLegacyData();
         saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
-        populateAgencySelects(); renderAgencies(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+        if (storageMode === "db" && dbApi) {
+          oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
+          oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
+          oldPaychecks.forEach(function (p) { deleteFromDb("paychecks", p.id); });
+          agencies.forEach(function (a) { pushToDb("agencies", a); });
+          visits.forEach(function (v) { pushToDb("visits", v); });
+          paychecks.forEach(function (p) { pushToDb("paychecks", p); });
+        }
+        renderAll();
         resetPaycheckForm();
         showDataMessage("Backup imported successfully.");
       } catch (err) { showDataMessage("Import failed: " + err.message); }
@@ -920,14 +1052,56 @@
   });
 
   document.getElementById("clear-all-btn").addEventListener("click", function () {
-    if (!confirm("This will permanently delete ALL agencies, visits and paychecks from this browser. Export a backup first if you want to keep a copy. Continue?")) return;
+    if (!confirm("This will permanently delete ALL agencies, visits, and paychecks (including paystub photos). Export a backup first if you want to keep a copy. Continue?")) return;
     if (!confirm("Are you absolutely sure? This cannot be undone.")) return;
+    var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
     agencies = []; visits = []; paychecks = [];
     saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
-    populateAgencySelects(); renderAgencies(); renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+    if (storageMode === "db" && dbApi) {
+      oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
+      oldPaychecks.forEach(function (p) {
+        deleteFromDb("paychecks", p.id);
+        if (p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
+      });
+      oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
+    }
+    renderAll();
     resetPaycheckForm();
     showDataMessage("All data deleted.");
   });
+
+  // ---------- storage: cloud (db + assets) with a local-browser fallback ----------
+
+  function pullFromDbAndRender() {
+    setStorageStatus("Checking cloud storage…", false);
+    Promise.all([
+      dbApi.collection("agencies").get(),
+      dbApi.collection("visits").get(),
+      dbApi.collection("paychecks").get()
+    ]).then(function (snaps) {
+      var cloudEmpty = snaps[0].empty && snaps[1].empty && snaps[2].empty;
+      if (cloudEmpty) {
+        if (agencies.length || visits.length || paychecks.length) {
+          agencies.forEach(function (a) { pushToDb("agencies", a); });
+          visits.forEach(function (v) { pushToDb("visits", v); });
+          paychecks.forEach(function (p) { pushToDb("paychecks", p); });
+          setStorageStatus("Recovered your existing data into cloud storage.", false);
+        } else {
+          setStorageStatus(null);
+        }
+      } else {
+        agencies = snaps[0].docs.map(docToRecord);
+        visits = snaps[1].docs.map(docToRecord);
+        paychecks = snaps[2].docs.map(docToRecord);
+        migrateLegacyData();
+        saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
+        renderAll();
+        setStorageStatus(null);
+      }
+    }).catch(function () {
+      setStorageStatus("Couldn't reach cloud storage — showing what's saved in this browser.", true);
+    });
+  }
 
   migrateLegacyData();
   populateAgencySelects();
@@ -935,4 +1109,21 @@
   renderAgencies();
   resetPaycheckForm();
   renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+
+  if (window.claude && window.claude.use) {
+    setStorageStatus("Checking cloud storage…", false);
+    Promise.all([window.claude.use("db"), window.claude.use("assets")]).then(function (results) {
+      dbApi = results[0];
+      assetsApi = results[1];
+      toggleAssetsUi();
+      if (dbApi) {
+        storageMode = "db";
+        pullFromDbAndRender();
+      } else {
+        setStorageStatus("Cloud storage isn't available in this view — saving to this browser only.", true);
+      }
+    }).catch(function () {
+      setStorageStatus("Cloud storage isn't available in this view — saving to this browser only.", true);
+    });
+  }
 })();
