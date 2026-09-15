@@ -81,6 +81,36 @@
     return div.innerHTML;
   }
 
+  // ---------- custom confirm dialog (native confirm() can be silently blocked in a sandboxed iframe) ----------
+
+  var confirmOverlay = document.getElementById("confirm-overlay");
+  var confirmMessageEl = document.getElementById("confirm-message");
+  var confirmOkBtn = document.getElementById("confirm-ok-btn");
+  var confirmCancelBtn = document.getElementById("confirm-cancel-btn");
+  var confirmResolver = null;
+
+  function showConfirm(message, okLabel) {
+    confirmMessageEl.textContent = message;
+    confirmOkBtn.textContent = okLabel || "Delete";
+    confirmOverlay.hidden = false;
+    document.body.style.overflow = "hidden";
+    window.setTimeout(function () { confirmCancelBtn.focus(); }, 0);
+    return new Promise(function (resolve) { confirmResolver = resolve; });
+  }
+
+  function closeConfirm(result) {
+    confirmOverlay.hidden = true;
+    document.body.style.overflow = "";
+    var resolve = confirmResolver;
+    confirmResolver = null;
+    if (resolve) resolve(result);
+  }
+
+  confirmOkBtn.addEventListener("click", function () { closeConfirm(true); });
+  confirmCancelBtn.addEventListener("click", function () { closeConfirm(false); });
+  confirmOverlay.addEventListener("click", function (e) { if (e.target === confirmOverlay) closeConfirm(false); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !confirmOverlay.hidden) closeConfirm(false); });
+
   // ---------- pay-period math ----------
 
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
@@ -285,11 +315,13 @@
     if (visitCount || paycheckCount) {
       msg += " It has " + visitCount + " visit(s) and " + paycheckCount + " paycheck(s) linked to it — those records are kept, but will show as an unknown agency.";
     }
-    if (!confirm(msg)) return;
-    agencies = agencies.filter(function (a) { return a.id !== id; });
-    saveAgencies();
-    deleteFromDb("agencies", id);
-    renderAll();
+    showConfirm(msg).then(function (ok) {
+      if (!ok) return;
+      agencies = agencies.filter(function (a) { return a.id !== id; });
+      saveAgencies();
+      deleteFromDb("agencies", id);
+      renderAll();
+    });
   }
 
   function scheduleSummaryText(agency) {
@@ -507,16 +539,18 @@
   }
 
   function deleteVisit(id, keepModalOpen) {
-    if (!confirm("Delete this visit? This cannot be undone.")) return;
-    var wasOpenDate = modalOpenDate;
-    visits = visits.filter(function (v) { return v.id !== id; });
-    saveVisits(visits);
-    deleteFromDb("visits", id);
-    renderAll();
-    if (keepModalOpen && wasOpenDate) {
-      resetModalForm(wasOpenDate);
-      renderModalDayList(wasOpenDate);
-    }
+    showConfirm("Delete this visit? This cannot be undone.").then(function (ok) {
+      if (!ok) return;
+      var wasOpenDate = modalOpenDate;
+      visits = visits.filter(function (v) { return v.id !== id; });
+      saveVisits(visits);
+      deleteFromDb("visits", id);
+      renderAll();
+      if (keepModalOpen && wasOpenDate) {
+        resetModalForm(wasOpenDate);
+        renderModalDayList(wasOpenDate);
+      }
+    });
   }
 
   // ---------- calendar ----------
@@ -855,13 +889,15 @@
   }
 
   function deletePaycheck(id) {
-    if (!confirm("Delete this paycheck record? This cannot be undone.")) return;
-    var p = paychecks.find(function (x) { return x.id === id; });
-    paychecks = paychecks.filter(function (x) { return x.id !== id; });
-    savePaychecks(paychecks);
-    deleteFromDb("paychecks", id);
-    if (p && p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
-    renderPaychecks(); renderSummary(); renderExpectedByPeriod(); renderShareTab();
+    showConfirm("Delete this paycheck record? This cannot be undone.").then(function (ok) {
+      if (!ok) return;
+      var p = paychecks.find(function (x) { return x.id === id; });
+      paychecks = paychecks.filter(function (x) { return x.id !== id; });
+      savePaychecks(paychecks);
+      deleteFromDb("paychecks", id);
+      if (p && p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
+      renderPaychecks(); renderSummary(); renderExpectedByPeriod(); renderShareTab();
+    });
   }
 
   function expectedForPaycheck(p) {
@@ -1139,49 +1175,64 @@
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function () {
+      var data;
       try {
-        var data = JSON.parse(reader.result);
+        data = JSON.parse(reader.result);
         if (!Array.isArray(data.visits) || !Array.isArray(data.paychecks)) throw new Error("Invalid backup file format.");
-        if (!confirm("Import will replace all current data with the backup contents. Continue?")) { e.target.value = ""; return; }
-        var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
-        agencies = Array.isArray(data.agencies) ? data.agencies : [];
-        visits = data.visits; paychecks = data.paychecks;
-        migrateLegacyData();
-        saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
-        if (storageMode === "db" && dbApi) {
-          oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
-          oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
-          oldPaychecks.forEach(function (p) { deleteFromDb("paychecks", p.id); });
-          agencies.forEach(function (a) { pushToDb("agencies", a); });
-          visits.forEach(function (v) { pushToDb("visits", v); });
-          paychecks.forEach(function (p) { pushToDb("paychecks", p); });
+      } catch (err) {
+        showDataMessage("Import failed: " + err.message);
+        e.target.value = "";
+        return;
+      }
+      showConfirm("Import will replace all current data with the backup contents. Continue?", "Import").then(function (ok) {
+        if (!ok) { e.target.value = ""; return; }
+        try {
+          var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
+          agencies = Array.isArray(data.agencies) ? data.agencies : [];
+          visits = data.visits; paychecks = data.paychecks;
+          migrateLegacyData();
+          saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
+          if (storageMode === "db" && dbApi) {
+            oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
+            oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
+            oldPaychecks.forEach(function (p) { deleteFromDb("paychecks", p.id); });
+            agencies.forEach(function (a) { pushToDb("agencies", a); });
+            visits.forEach(function (v) { pushToDb("visits", v); });
+            paychecks.forEach(function (p) { pushToDb("paychecks", p); });
+          }
+          renderAll();
+          resetPaycheckForm();
+          showDataMessage("Backup imported successfully.");
+        } catch (err) {
+          showDataMessage("Import failed: " + err.message);
         }
-        renderAll();
-        resetPaycheckForm();
-        showDataMessage("Backup imported successfully.");
-      } catch (err) { showDataMessage("Import failed: " + err.message); }
-      e.target.value = "";
+        e.target.value = "";
+      });
     };
     reader.readAsText(file);
   });
 
   document.getElementById("clear-all-btn").addEventListener("click", function () {
-    if (!confirm("This will permanently delete ALL agencies, visits, and paychecks (including paystub photos). Export a backup first if you want to keep a copy. Continue?")) return;
-    if (!confirm("Are you absolutely sure? This cannot be undone.")) return;
-    var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
-    agencies = []; visits = []; paychecks = [];
-    saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
-    if (storageMode === "db" && dbApi) {
-      oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
-      oldPaychecks.forEach(function (p) {
-        deleteFromDb("paychecks", p.id);
-        if (p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
+    showConfirm("This will permanently delete ALL agencies, visits, and paychecks (including paystub photos). Export a backup first if you want to keep a copy. Continue?").then(function (ok1) {
+      if (!ok1) return;
+      return showConfirm("Are you absolutely sure? This cannot be undone.").then(function (ok2) {
+        if (!ok2) return;
+        var oldAgencies = agencies, oldVisits = visits, oldPaychecks = paychecks;
+        agencies = []; visits = []; paychecks = [];
+        saveAgencies(); saveVisits(visits); savePaychecks(paychecks);
+        if (storageMode === "db" && dbApi) {
+          oldVisits.forEach(function (v) { deleteFromDb("visits", v.id); });
+          oldPaychecks.forEach(function (p) {
+            deleteFromDb("paychecks", p.id);
+            if (p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
+          });
+          oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
+        }
+        renderAll();
+        resetPaycheckForm();
+        showDataMessage("All data deleted.");
       });
-      oldAgencies.forEach(function (a) { deleteFromDb("agencies", a.id); });
-    }
-    renderAll();
-    resetPaycheckForm();
-    showDataMessage("All data deleted.");
+    });
   });
 
   // ---------- storage: cloud (db + assets) with a local-browser fallback ----------
