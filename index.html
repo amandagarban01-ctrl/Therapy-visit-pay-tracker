@@ -39,6 +39,7 @@
     <button class="tab-btn active" data-tab="visits">Visits</button>
     <button class="tab-btn" data-tab="agencies">Agencies</button>
     <button class="tab-btn" data-tab="paychecks">Paychecks &amp; Reconciliation</button>
+    <button class="tab-btn" data-tab="share">Share</button>
     <button class="tab-btn" data-tab="data">Data</button>
   </nav>
 
@@ -209,6 +210,14 @@
         <input type="date" id="agency-anchor" />
       </label>
 
+      <label>Payroll contact email <span class="optional">(optional)</span>
+        <input type="email" id="agency-contact-email" placeholder="payroll@agency.com" />
+      </label>
+
+      <label>Payroll contact phone <span class="optional">(optional)</span>
+        <input type="tel" id="agency-contact-phone" placeholder="(555) 555-5555" />
+      </label>
+
       <h3 class="full-width">Standard rate per visit type <span class="optional">(optional — leave blank to always enter the amount manually)</span></h3>
       <div class="full-width form-grid" id="agency-rate-grid"></div>
 
@@ -312,6 +321,17 @@
         </table>
         <p id="paychecks-empty" class="empty-state" hidden>No paychecks logged yet.</p>
       </div>
+    </div>
+  </section>
+
+  <!-- SHARE -->
+  <section id="tab-share" class="panel">
+    <div class="card">
+      <h2>Disputed pay periods</h2>
+      <p class="hint">Periods where a logged paycheck doesn't match what the app calculated you were owed. Share the details by email or text to follow up.</p>
+      <div id="dispute-list" class="day-visit-list"></div>
+      <p id="disputes-empty" class="empty-state" hidden>No payment discrepancies right now — expected and actual match for every logged paycheck.</p>
+      <p id="share-message" class="hint"></p>
     </div>
   </section>
 

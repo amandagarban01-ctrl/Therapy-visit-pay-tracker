@@ -42,6 +42,13 @@ type, expected pay, and pay status.
   visually compare the check to what you logged. One photo per paycheck;
   uploading a new one replaces the old. This is a visual reference only —
   nothing on the photo is read automatically.
+- **Share disputed pay periods** — the Share tab lists every pay period where
+  a logged paycheck doesn't match the expected total. Tap Share on any of
+  them to send the details (agency, period, expected/received amounts, and
+  every visit in that period) by email or text — it uses your device's
+  native share sheet, or copies the summary to your clipboard if that isn't
+  available. Give an agency an optional payroll contact email/phone (in the
+  Agencies tab) and it's included in the message automatically.
 - **Backup / restore** — export all data (agencies, visits, paychecks) as a
   JSON file, or visits as CSV, and re-import the JSON later or on another
   device.

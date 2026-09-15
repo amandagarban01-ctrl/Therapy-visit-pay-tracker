@@ -240,7 +240,14 @@
     if (scheduleType === "weekly" || scheduleType === "biweekly") {
       schedule.anchor = agencyAnchor.value || todayIso();
     }
-    var record = { id: id || uid(), name: agencyNameField.value.trim(), schedule: schedule, rates: readRateGridValues() };
+    var record = {
+      id: id || uid(),
+      name: agencyNameField.value.trim(),
+      schedule: schedule,
+      rates: readRateGridValues(),
+      contactEmail: document.getElementById("agency-contact-email").value.trim(),
+      contactPhone: document.getElementById("agency-contact-phone").value.trim()
+    };
     if (id) {
       var idx = agencies.findIndex(function (a) { return a.id === id; });
       if (idx !== -1) agencies[idx] = record;
@@ -261,6 +268,8 @@
     agencyScheduleType.value = (a.schedule && a.schedule.type) || "monthly";
     toggleAgencyAnchor();
     agencyAnchor.value = (a.schedule && a.schedule.anchor) || "";
+    document.getElementById("agency-contact-email").value = a.contactEmail || "";
+    document.getElementById("agency-contact-phone").value = a.contactPhone || "";
     buildRateGrid(a.rates || {});
     agencyFormHeading.textContent = "Edit agency";
     agencySubmitBtn.textContent = "Save changes";
@@ -295,17 +304,26 @@
     return parts.length ? parts.join(" · ") : "No standard rates set — amount entered manually each visit";
   }
 
+  function contactSummaryText(agency) {
+    var parts = [];
+    if (agency.contactEmail) parts.push(agency.contactEmail);
+    if (agency.contactPhone) parts.push(agency.contactPhone);
+    return parts.length ? "Payroll contact: " + parts.join(" · ") : "";
+  }
+
   function renderAgencies() {
     var list = document.getElementById("agency-list");
     var sorted = agencies.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     list.innerHTML = "";
     sorted.forEach(function (a) {
+      var contact = contactSummaryText(a);
       var row = document.createElement("div");
       row.className = "day-visit-row";
       row.innerHTML =
         '<div class="dv-main"><div class="dv-company">' + escapeHtml(a.name) + "</div>" +
         '<div class="dv-meta">' + escapeHtml(scheduleSummaryText(a)) + "</div>" +
-        '<div class="dv-meta">' + escapeHtml(rateSummaryText(a)) + "</div></div>" +
+        '<div class="dv-meta">' + escapeHtml(rateSummaryText(a)) + "</div>" +
+        (contact ? '<div class="dv-meta">' + escapeHtml(contact) + "</div>" : "") + "</div>" +
         '<div class="row-actions"><button type="button" class="icon-btn" data-agency-edit="' + a.id + '">Edit</button>' +
         '<button type="button" class="icon-btn danger" data-agency-delete="' + a.id + '">Delete</button></div>';
       list.appendChild(row);
@@ -814,7 +832,7 @@
       assetsApi.delete(pendingPaystubOldAssetId).catch(function () {});
     }
     resetPaycheckForm();
-    renderPaychecks(); renderSummary(); renderExpectedByPeriod();
+    renderPaychecks(); renderSummary(); renderExpectedByPeriod(); renderShareTab();
   });
 
   paycheckCancelBtn.addEventListener("click", resetPaycheckForm);
@@ -843,7 +861,7 @@
     savePaychecks(paychecks);
     deleteFromDb("paychecks", id);
     if (p && p.paystubAssetId && assetsApi) assetsApi.delete(p.paystubAssetId).catch(function () {});
-    renderPaychecks(); renderSummary(); renderExpectedByPeriod();
+    renderPaychecks(); renderSummary(); renderExpectedByPeriod(); renderShareTab();
   }
 
   function expectedForPaycheck(p) {
@@ -897,8 +915,7 @@
     tbody.querySelectorAll("[data-delete-pc]").forEach(function (btn) { btn.addEventListener("click", function () { deletePaycheck(btn.dataset.deletePc); }); });
   }
 
-  function renderExpectedByPeriod() {
-    var tbody = document.getElementById("expected-period-tbody");
+  function buildPeriodGroups() {
     var groups = {};
     visits.forEach(function (v) {
       if (!v.agencyId || !v.date) return;
@@ -919,12 +936,21 @@
       g.received = matching.reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
       g.hasPaycheck = matching.length > 0;
     });
+    return rows;
+  }
 
+  function sortPeriodGroups(rows) {
     rows.sort(function (a, b) {
       var an = agencyName(a.agencyId), bn = agencyName(b.agencyId);
       if (an !== bn) return an.localeCompare(bn);
       return b.period.start.localeCompare(a.period.start);
     });
+    return rows;
+  }
+
+  function renderExpectedByPeriod() {
+    var tbody = document.getElementById("expected-period-tbody");
+    var rows = sortPeriodGroups(buildPeriodGroups());
 
     tbody.innerHTML = "";
     rows.forEach(function (g) {
@@ -950,6 +976,93 @@
       tbody.appendChild(tr);
     });
     document.getElementById("expected-period-empty").hidden = rows.length !== 0;
+  }
+
+  // ---------- share disputes ----------
+
+  var currentDisputeGroups = {};
+  var shareMessageEl = document.getElementById("share-message");
+
+  function showShareMessage(msg) {
+    shareMessageEl.textContent = msg;
+    setTimeout(function () { if (shareMessageEl.textContent === msg) shareMessageEl.textContent = ""; }, 6000);
+  }
+
+  function buildDisputeMessage(group) {
+    var diff = group.received - group.expected;
+    var lines = [];
+    lines.push("Pay discrepancy — " + agencyName(group.agencyId));
+    lines.push("Pay period: " + formatPeriodLabel(group.period));
+    lines.push("Expected: " + formatMoney(group.expected));
+    lines.push("Received: " + formatMoney(group.received));
+    lines.push("Difference: " + (diff < 0 ? "Short " : "Over ") + formatMoney(Math.abs(diff)));
+    lines.push("");
+    lines.push("Visits this period:");
+    group.visits.slice().sort(function (a, b) { return (a.date || "").localeCompare(b.date || ""); })
+      .forEach(function (v) {
+        lines.push("- " + formatDate(v.date) + " — " + (v.visitType || "Visit") + " — " + formatMoney(visitTotal(v)));
+      });
+    var agency = agencyById(group.agencyId);
+    var contact = agency ? contactSummaryText(agency) : "";
+    if (contact) { lines.push(""); lines.push(contact); }
+    return lines.join("\n");
+  }
+
+  function copyDisputeMessage(message) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(message).then(function () {
+        showShareMessage("Copied — paste it into your email or text message app.");
+      }).catch(function () {
+        showShareMessage("Couldn't copy automatically — select and copy the text manually.");
+      });
+    } else {
+      showShareMessage("Copy isn't available in this browser — select and copy the text manually.");
+    }
+  }
+
+  function shareDispute(key) {
+    var group = currentDisputeGroups[key];
+    if (!group) return;
+    var message = buildDisputeMessage(group);
+    var title = "Pay discrepancy — " + agencyName(group.agencyId);
+    if (navigator.share) {
+      navigator.share({ title: title, text: message }).catch(function (err) {
+        if (err && err.name === "AbortError") return;
+        copyDisputeMessage(message);
+      });
+    } else {
+      copyDisputeMessage(message);
+    }
+  }
+
+  function renderShareTab() {
+    var list = document.getElementById("dispute-list");
+    var rows = sortPeriodGroups(buildPeriodGroups()).filter(function (g) {
+      return g.hasPaycheck && Math.abs(g.received - g.expected) >= 0.005;
+    });
+
+    currentDisputeGroups = {};
+    list.innerHTML = "";
+    rows.forEach(function (g) {
+      var key = g.agencyId + "|" + g.period.start + "|" + g.period.end;
+      currentDisputeGroups[key] = g;
+      var diff = g.received - g.expected;
+      var diffLabel = (diff < 0 ? "Short " : "Over ") + formatMoney(Math.abs(diff));
+      var diffClass = diff < 0 ? "badge-disputed" : "badge-pending";
+      var row = document.createElement("div");
+      row.className = "day-visit-row";
+      row.innerHTML =
+        '<div class="dv-main"><div class="dv-company">' + escapeHtml(agencyName(g.agencyId)) + "</div>" +
+        '<div class="dv-meta">' + escapeHtml(formatPeriodLabel(g.period)) + " · Expected " + escapeHtml(formatMoney(g.expected)) +
+        " · Received " + escapeHtml(formatMoney(g.received)) + "</div></div>" +
+        '<span class="badge ' + diffClass + '">' + escapeHtml(diffLabel) + "</span>" +
+        '<div class="row-actions"><button type="button" class="icon-btn" data-share-key="' + key + '">Share</button></div>';
+      list.appendChild(row);
+    });
+    document.getElementById("disputes-empty").hidden = rows.length !== 0;
+    list.querySelectorAll("[data-share-key]").forEach(function (btn) {
+      btn.addEventListener("click", function () { shareDispute(btn.dataset.shareKey); });
+    });
   }
 
   function renderSummary() {
@@ -982,6 +1095,7 @@
     renderCalendar();
     renderPaychecks();
     renderExpectedByPeriod();
+    renderShareTab();
     renderSummary();
   }
 
@@ -1108,7 +1222,7 @@
   resetAgencyForm();
   renderAgencies();
   resetPaycheckForm();
-  renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod();
+  renderVisits(); renderPaychecks(); renderSummary(); renderCalendar(); renderExpectedByPeriod(); renderShareTab();
 
   if (window.claude && window.claude.use) {
     setStorageStatus("Checking cloud storage…", false);

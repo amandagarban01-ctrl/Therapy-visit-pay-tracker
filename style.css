@@ -181,7 +181,7 @@
     flex: 0 0 auto;
   }
 
-  .tab-btn:hover { color: var(--ink); }
+  .tab-btn:hover { color: var(--ink); background: none; }
   .tab-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
   .tab-btn.active {
@@ -519,6 +519,8 @@
     padding: 0 5px;
   }
 
+  .cal-more:hover { background: none; color: var(--ink); }
+
   .cal-empty-hint {
     color: var(--line-strong);
     font-size: 1.1rem;
@@ -629,6 +631,8 @@
     padding: 0;
     cursor: pointer;
   }
+
+  .paystub-thumb-btn:hover { background: none; }
 
   .paystub-thumb-btn img {
     width: 48px;
