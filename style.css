@@ -410,7 +410,22 @@
     line-height: 1;
   }
 
-  .cal-actions { display: flex; gap: 0.6rem; }
+  .cal-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+
+  #voice-add-btn.listening {
+    background: var(--rust);
+    border-color: var(--rust);
+    color: #fff;
+    animation: voice-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes voice-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  #voice-status { color: var(--ink-muted); }
+  #voice-status.voice-error { color: var(--rust); }
 
   .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 

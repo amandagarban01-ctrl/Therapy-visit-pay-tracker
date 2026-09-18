@@ -54,10 +54,12 @@
         </div>
         <div class="cal-actions">
           <button type="button" id="cal-today-btn" class="secondary">Today</button>
+          <button type="button" id="voice-add-btn" class="secondary" hidden>🎤 Speak visit</button>
           <button type="button" id="cal-add-btn">+ Add visit</button>
         </div>
       </div>
       <p class="hint">Click any day to add a visit, or click an existing entry to edit it.</p>
+      <p class="hint" id="voice-status" hidden></p>
       <div class="cal-scroll">
         <div class="cal-weekdays">
           <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
@@ -194,6 +196,23 @@
       <div class="form-actions">
         <button type="button" id="confirm-ok-btn" class="danger">Delete</button>
         <button type="button" id="confirm-cancel-btn" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VOICE CONFIRM -->
+  <div class="modal-overlay" id="voice-confirm-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="voice-confirm-heading">
+      <div class="modal-header">
+        <h2 id="voice-confirm-heading">Here's what I heard</h2>
+        <button type="button" class="icon-btn" id="voice-confirm-close" aria-label="Close">Close ×</button>
+      </div>
+      <p class="hint">"<span id="voice-heard-text"></span>"</p>
+      <div id="voice-confirm-summary" class="day-visit-row"></div>
+      <div class="form-actions">
+        <button type="button" id="voice-confirm-add-btn">Add visit</button>
+        <button type="button" id="voice-confirm-edit-btn" class="secondary">Edit details</button>
+        <button type="button" id="voice-confirm-cancel-btn" class="secondary">Cancel</button>
       </div>
     </div>
   </div>

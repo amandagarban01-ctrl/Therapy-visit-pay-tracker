@@ -452,7 +452,7 @@
     });
   }
 
-  function openDayModal(dateIso, editId) {
+  function openDayModal(dateIso, editId, prefill) {
     modalOpenDate = dateIso;
     modalDateLabel.textContent = weekdayLong(dateIso);
     renderModalDayList(dateIso);
@@ -460,6 +460,11 @@
       populateModalForEdit(editId);
     } else {
       resetModalForm(dateIso);
+      if (prefill) {
+        if (prefill.agencyId) mVisitAgency.value = prefill.agencyId;
+        if (prefill.visitType) mVisitType.value = prefill.visitType;
+        maybeAutoFillRate();
+      }
     }
     modalOverlay.hidden = false;
     document.body.style.overflow = "hidden";
@@ -660,6 +665,262 @@
     var d = (y === today.getFullYear() && m === today.getMonth()) ? today.getDate() : 1;
     openDayModal(isoDate(y, m, d));
   });
+
+  // ---------- voice entry ----------
+
+  var VISIT_TYPE_PHRASES = [
+    { type: "Discharge Discipline", phrases: ["discharge discipline"] },
+    { type: "Discharge OASIS", phrases: ["discharge oasis", "discharge o.a.s.i.s"] },
+    { type: "PT Evaluation", phrases: ["pt evaluation", "p.t. evaluation", "physical therapy evaluation", "evaluation"] },
+    { type: "Recertification", phrases: ["recertification", "re-certification", "recert"] },
+    { type: "Reassessment", phrases: ["reassessment", "re-assessment"] },
+    { type: "OASIS", phrases: ["oasis", "o.a.s.i.s"] },
+    { type: "PT Visit", phrases: ["pt visit", "p.t. visit", "physical therapy visit", "visit"] }
+  ];
+
+  function matchVisitType(text) {
+    var lower = text.toLowerCase();
+    for (var i = 0; i < VISIT_TYPE_PHRASES.length; i++) {
+      var entry = VISIT_TYPE_PHRASES[i];
+      for (var j = 0; j < entry.phrases.length; j++) {
+        if (lower.indexOf(entry.phrases[j]) !== -1) return entry.type;
+      }
+    }
+    return null;
+  }
+
+  function matchAgency(text) {
+    var lower = text.toLowerCase();
+    var exact = agencies.find(function (a) { return a.name && lower.indexOf(a.name.toLowerCase()) !== -1; });
+    if (exact) return exact;
+    var words = lower.split(/\s+/).filter(Boolean);
+    var best = null, bestScore = 0;
+    agencies.forEach(function (a) {
+      var aWords = (a.name || "").toLowerCase().split(/\s+/).filter(Boolean);
+      if (!aWords.length) return;
+      var hits = aWords.filter(function (w) { return words.indexOf(w) !== -1; }).length;
+      var score = hits / aWords.length;
+      if (score > bestScore) { bestScore = score; best = a; }
+    });
+    return bestScore >= 0.6 ? best : null;
+  }
+
+  var VOICE_WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  var VOICE_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+  function parseSpokenDate(text) {
+    var lower = text.toLowerCase();
+    var now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (/\btoday\b/.test(lower)) return isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+    if (/\btomorrow\b/.test(lower)) {
+      var t = new Date(now); t.setDate(t.getDate() + 1);
+      return isoDate(t.getFullYear(), t.getMonth(), t.getDate());
+    }
+    if (/\byesterday\b/.test(lower)) {
+      var y = new Date(now); y.setDate(y.getDate() - 1);
+      return isoDate(y.getFullYear(), y.getMonth(), y.getDate());
+    }
+    for (var mi = 0; mi < VOICE_MONTHS.length; mi++) {
+      var re = new RegExp("\\b" + VOICE_MONTHS[mi] + "\\s+(\\d{1,2})(st|nd|rd|th)?\\b");
+      var m = lower.match(re);
+      if (m) {
+        var day = parseInt(m[1], 10);
+        var year = now.getFullYear();
+        var candidate = new Date(year, mi, day);
+        if (candidate < now && (now - candidate) > 1000 * 60 * 60 * 24 * 200) candidate = new Date(year + 1, mi, day);
+        return isoDate(candidate.getFullYear(), candidate.getMonth(), candidate.getDate());
+      }
+    }
+    for (var wi = 0; wi < VOICE_WEEKDAYS.length; wi++) {
+      if (lower.indexOf(VOICE_WEEKDAYS[wi]) !== -1) {
+        var targetDow = wi;
+        var diff = (targetDow - now.getDay() + 7) % 7;
+        var isNext = /\bnext\b/.test(lower);
+        if (diff === 0 && isNext) diff = 7;
+        else if (isNext) diff += 7;
+        var d2 = new Date(now); d2.setDate(d2.getDate() + diff);
+        return isoDate(d2.getFullYear(), d2.getMonth(), d2.getDate());
+      }
+    }
+    var nthMatch = lower.match(/\bthe\s+(\d{1,2})(st|nd|rd|th)?\b/);
+    if (nthMatch) {
+      var nthDay = parseInt(nthMatch[1], 10);
+      if (nthDay >= 1 && nthDay <= 31) {
+        var candidate2 = new Date(now.getFullYear(), now.getMonth(), nthDay);
+        if (candidate2 < now && (now - candidate2) > 1000 * 60 * 60 * 24 * 20) {
+          candidate2 = new Date(now.getFullYear(), now.getMonth() + 1, nthDay);
+        }
+        return isoDate(candidate2.getFullYear(), candidate2.getMonth(), candidate2.getDate());
+      }
+    }
+    return null;
+  }
+
+  function parseVoiceCommand(transcript) {
+    return {
+      transcript: transcript,
+      agency: matchAgency(transcript),
+      visitType: matchVisitType(transcript),
+      dateIso: parseSpokenDate(transcript)
+    };
+  }
+
+  var voiceAddBtn = document.getElementById("voice-add-btn");
+  var voiceStatusEl = document.getElementById("voice-status");
+  var voiceConfirmOverlay = document.getElementById("voice-confirm-overlay");
+  var voiceHeardText = document.getElementById("voice-heard-text");
+  var voiceConfirmSummary = document.getElementById("voice-confirm-summary");
+  var voiceConfirmAddBtn = document.getElementById("voice-confirm-add-btn");
+  var voiceConfirmEditBtn = document.getElementById("voice-confirm-edit-btn");
+  var voiceConfirmCancelBtn = document.getElementById("voice-confirm-cancel-btn");
+  var voiceConfirmCloseBtn = document.getElementById("voice-confirm-close");
+
+  var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recognizer = null;
+  var listening = false;
+  var pendingVoiceResult = null;
+
+  function setVoiceStatus(text, isError) {
+    if (!text) { voiceStatusEl.hidden = true; voiceStatusEl.textContent = ""; return; }
+    voiceStatusEl.textContent = text;
+    voiceStatusEl.className = isError ? "hint voice-error" : "hint";
+    voiceStatusEl.hidden = false;
+  }
+
+  function closeVoiceConfirm() {
+    voiceConfirmOverlay.hidden = true;
+    document.body.style.overflow = "";
+    pendingVoiceResult = null;
+  }
+
+  function showVoiceConfirm(result) {
+    pendingVoiceResult = result;
+    voiceHeardText.textContent = result.transcript;
+    var amount = (result.agency.rates && result.agency.rates[result.visitType]) || 0;
+    voiceConfirmSummary.innerHTML =
+      '<div class="dv-main"><div class="dv-company">' + escapeHtml(result.agency.name) + "</div>" +
+      '<div class="dv-meta">' + escapeHtml(result.visitType) + " · " + escapeHtml(weekdayLong(result.dateIso)) + "</div>" +
+      '<div class="dv-meta">' + escapeHtml(formatMoney(amount)) + "</div></div>";
+    voiceConfirmOverlay.hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
+  voiceConfirmAddBtn.addEventListener("click", function () {
+    if (!pendingVoiceResult) return;
+    var r = pendingVoiceResult;
+    var amount = (r.agency.rates && r.agency.rates[r.visitType]) || 0;
+    var record = {
+      id: uid(),
+      date: r.dateIso,
+      agencyId: r.agency.id,
+      visitType: r.visitType,
+      amount: amount,
+      travelPay: 0,
+      extraPay: 0,
+      payDate: "",
+      status: "pending",
+      notes: ""
+    };
+    visits.push(record);
+    saveVisits(visits);
+    pushToDb("visits", record);
+    renderAll();
+    closeVoiceConfirm();
+    setVoiceStatus("Added " + r.visitType + " for " + r.agency.name + " on " + weekdayLong(r.dateIso) + ".");
+  });
+
+  voiceConfirmEditBtn.addEventListener("click", function () {
+    if (!pendingVoiceResult) return;
+    var r = pendingVoiceResult;
+    closeVoiceConfirm();
+    document.querySelector('.tab-btn[data-tab="visits"]').click();
+    openDayModal(r.dateIso, null, { agencyId: r.agency.id, visitType: r.visitType });
+  });
+
+  voiceConfirmCancelBtn.addEventListener("click", closeVoiceConfirm);
+  voiceConfirmCloseBtn.addEventListener("click", closeVoiceConfirm);
+  voiceConfirmOverlay.addEventListener("click", function (e) { if (e.target === voiceConfirmOverlay) closeVoiceConfirm(); });
+
+  function openVoiceFallback(result, hasAgency, hasType, hasDate, hasRate) {
+    var dateIso = result.dateIso || todayIso();
+    document.querySelector('.tab-btn[data-tab="visits"]').click();
+    openDayModal(dateIso, null, {
+      agencyId: result.agency ? result.agency.id : null,
+      visitType: result.visitType
+    });
+    var missing = [];
+    if (!hasAgency) missing.push("agency");
+    if (!hasType) missing.push("visit type");
+    if (!hasDate) missing.push("date");
+    if (hasAgency && hasType && hasDate && !hasRate) {
+      setVoiceStatus('Heard "' + result.transcript + '" — that agency has no saved rate for that visit type, so enter the amount below.');
+    } else {
+      setVoiceStatus('Heard "' + result.transcript + '" — couldn\'t catch the ' + missing.join(" and ") + ". Fill in the rest below.");
+    }
+  }
+
+  function handleVoiceTranscript(transcript) {
+    var result = parseVoiceCommand(transcript);
+    var hasAgency = !!result.agency;
+    var hasType = !!result.visitType;
+    var hasDate = !!result.dateIso;
+    var hasRate = hasAgency && hasType && result.agency.rates && result.agency.rates[result.visitType] > 0;
+    if (hasAgency && hasType && hasDate && hasRate) {
+      setVoiceStatus("");
+      showVoiceConfirm(result);
+    } else {
+      openVoiceFallback(result, hasAgency, hasType, hasDate, hasRate);
+    }
+  }
+
+  if (SpeechRecognitionCtor) {
+    voiceAddBtn.hidden = false;
+    recognizer = new SpeechRecognitionCtor();
+    recognizer.continuous = false;
+    recognizer.interimResults = false;
+    recognizer.lang = "en-US";
+    recognizer.maxAlternatives = 1;
+
+    recognizer.onstart = function () {
+      listening = true;
+      voiceAddBtn.classList.add("listening");
+      voiceAddBtn.textContent = "🎤 Listening… tap to stop";
+      setVoiceStatus('Listening — try "Riverbend Home Health, PT visit, today."');
+    };
+    recognizer.onresult = function (e) {
+      var transcript = e.results[0][0].transcript;
+      handleVoiceTranscript(transcript);
+    };
+    recognizer.onerror = function (e) {
+      if (e.error === "no-speech") {
+        setVoiceStatus("Didn't catch that — tap the mic and try again.", true);
+      } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setVoiceStatus("Microphone access was blocked. Check your browser/device permissions for this page and try again.", true);
+      } else if (e.error === "aborted") {
+        setVoiceStatus("");
+      } else {
+        setVoiceStatus("Voice entry error: " + e.error + ". Please try again.", true);
+      }
+    };
+    recognizer.onend = function () {
+      listening = false;
+      voiceAddBtn.classList.remove("listening");
+      voiceAddBtn.textContent = "🎤 Speak visit";
+    };
+
+    voiceAddBtn.addEventListener("click", function () {
+      if (listening) {
+        recognizer.stop();
+        return;
+      }
+      amountManuallyEdited = false;
+      try {
+        recognizer.start();
+      } catch (err) {
+        setVoiceStatus("Couldn't start voice entry. Please try again.", true);
+      }
+    });
+  }
 
   function statusBadge(status) {
     var label = status.charAt(0).toUpperCase() + status.slice(1);

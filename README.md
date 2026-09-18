@@ -18,6 +18,19 @@ type, expected pay, and pay status.
   to add a visit for that date, or click an existing entry to edit or delete
   it. A list of all visits (filterable by agency, visit type, and status) sits
   below the calendar for bulk review.
+- **Voice entry** — on browsers that support speech recognition, a "🎤 Speak
+  visit" button sits next to Add visit. Tap it, say the agency, visit type,
+  and day in that order (e.g. "Riverbend Home Health, PT visit, today"), and
+  tap again to stop. If it clearly understood the agency, visit type, day,
+  and the agency has a saved rate for that visit type, it shows you exactly
+  what it heard before saving — nothing is added without your confirmation.
+  If anything wasn't clear, it opens the normal Add Visit form pre-filled
+  with whatever it did understand, so you just fill in the rest. This uses
+  your browser's built-in speech recognition (on Chrome, that sends audio to
+  Google's speech service to be transcribed, the same as any dictation
+  feature — nothing about your visits or agencies is sent, only the words
+  you speak while the mic button is active). The button is hidden
+  automatically on browsers/devices that don't support voice recognition.
 - **Visits** — log each billable visit: date, agency, visit type (PT
   Evaluation, PT Visit, Reassessment, Discharge Discipline, Discharge OASIS,
   Recertification, or OASIS), expected pay, expected pay date, and status
