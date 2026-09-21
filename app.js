@@ -668,6 +668,10 @@
 
   // ---------- voice entry ----------
 
+  function isEmbeddedView() {
+    try { return window.self !== window.top; } catch (e) { return true; }
+  }
+
   var VISIT_TYPE_PHRASES = [
     { type: "Discharge Discipline", phrases: ["discharge discipline"] },
     { type: "Discharge OASIS", phrases: ["discharge oasis", "discharge o.a.s.i.s"] },
@@ -895,7 +899,11 @@
       if (e.error === "no-speech") {
         setVoiceStatus("Didn't catch that — tap the mic and try again.", true);
       } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        setVoiceStatus("Microphone access was blocked. Check your browser/device permissions for this page and try again.", true);
+        if (isEmbeddedView()) {
+          setVoiceStatus("Microphone access is blocked in this embedded view. Open the app's own link directly in your browser (not inside another app or preview) to use voice entry.", true);
+        } else {
+          setVoiceStatus("Microphone access was blocked. Check your browser/device settings for this site and try again.", true);
+        }
       } else if (e.error === "aborted") {
         setVoiceStatus("");
       } else {
